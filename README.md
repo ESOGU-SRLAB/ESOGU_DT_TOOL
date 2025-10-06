@@ -14,19 +14,19 @@ Software Testing Life Cycle (STLC) represents a critical phase in software devel
 
 The system implements eleven comprehensive STLC modules, each designed according to established software engineering principles:
 
-| Module ID | Component | Functionality | Output Format | AI Model Integration | Standards Compliance |
-|-----------|-----------|---------------|---------------|---------------------|---------------------|
-| 1 | Code Review | Static analysis, security assessment, performance evaluation | Structured JSON + Detailed reports | Multi-model architecture | ISTQB Foundation Level |
-| 2 | Requirement Analysis | Requirement validation, gap analysis, compliance verification | IEEE 830 compliant JSON | Google Gemini Pro | IEEE 829/830 Standards |
-| 3 | Test Planning | Resource allocation, timeline management, Gantt chart generation | JSON + Timeline visualization | GPT/Gemini hybrid | PMI methodology |
-| 4 | Test Scenario Generation | Comprehensive scenario creation, edge case identification | Structured JSON arrays | Multi-model ensemble | ISTQB Advanced Level |
-| 5 | Test Case Generation | Detailed test case specification, step-by-step procedures | IEEE 829 format | CodeLlama optimization | IEEE 829 Standard |
-| 6 | Test Case Optimization | Deduplication algorithms, priority-based ranking | Optimized JSON structures | 7+ model integration | Risk-based testing |
-| 7 | Test Code Generation | Automated test script generation (Selenium, API, Unit) | Framework-agnostic code | DeepSeek/Kimi models | Framework-independent |
-| 8 | Environment Setup | Configuration management, deployment guides | JSON configuration files | LM Studio integration | DevOps best practices |
-| 9 | Test Execution | Automated test running, result aggregation | Execution reports | Custom engine | CI/CD integration |
-| 10 | Test Reporting | Comprehensive reporting, stakeholder communication | HTML/PDF formats | Analytics engine | Stakeholder-ready reports |
-| 11 | Test Closure | Process completion analysis, lessons learned documentation | Summary reports | Multi-source aggregation | Process improvement |
+| Module ID | Component | Functionality |
+|-----------|-----------|---------------|
+| 1 | Code Review | Static analysis, security assessment, performance evaluation |
+| 2 | Requirement Analysis | Requirement validation, gap analysis, compliance verification |
+| 3 | Test Planning | Resource allocation, timeline management, Gantt chart generation |
+| 4 | Environment Setup | Configuration management |
+| 5 | Test Scenario Generation | Comprehensive test scenario generation |
+| 6 | Test Case Generation | Detailed test case specification, step-by-step procedures |
+| 7 | Test Case Optimization | Samrt selection for generated test cases |
+| 8 | Test Code Generation | Automated test script generation |
+| 9 | Test Execution | Automated test running using the MCP Server |
+| 10 | Test Reporting | Comprehensive reporting, stakeholder communication |
+| 11 | Test Closure | Process completion analysis |
 
 ### 2.2 Technology Stack
 
@@ -83,10 +83,10 @@ STLC-Manager/
 
 The system employs a sophisticated multi-model architecture:
 
-- **Primary Models**: OpenAI GPT-4, Google Gemini Pro for complex analysis tasks
+- **Primary Models**: OpenAI GPT-4, Google Gemini Pro for complex analysis tasks with API
 - **Specialized Models**: CodeLlama for code generation, DeepSeek for optimization
 - **Local Models**: LM Studio and Ollama for privacy-sensitive operations
-- **Fallback System**: Automatic model switching based on availability and performance metrics
+- **Fallback System**: Automatic model switching based on availability and performance metrics (e.g. Token Limits)
 
 ### 3.2 Performance Optimization
 
@@ -232,19 +232,7 @@ This project builds upon established frameworks and methodologies:
 
 ## 11. License
 
-This project is licensed under the MIT License. For detailed information, please refer to the `LICENSE` file in the repository.
-
-## 12. Citation
-
-```bibtex
-@software{stlc_manager_2024,
-  title={STLC Manager: An AI-Powered Software Testing Life Cycle Management System},
-  author={Development Team},
-  year={2024},
-  url={https://github.com/cembglm/temp-stlc},
-  version={1.0.0}
-}
-```
+This project is licensed under the Apache License 2.0 License. For detailed information, please refer to the `LICENSE` file in the repository.
 
 ---
 
