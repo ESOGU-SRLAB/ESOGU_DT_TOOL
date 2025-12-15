@@ -55,7 +55,8 @@ export default function TestExecutionForm({
   onSetOutput,
   managedFiles = [],
   disabled = false,
-  process
+  process,
+  onTestCaseGeneration // Yeni prop - TabPanel'den gelen form state handler
 }) {
   // Redux state for API keys
   const apiKeys = useSelector((state) => state.apiKey.apiKeys);
@@ -90,7 +91,6 @@ export default function TestExecutionForm({
   const [individualTests, setIndividualTests] = useState([]);
   const [selectedTests, setSelectedTests] = useState([]);
   const [isLoadingTests, setIsLoadingTests] = useState(false);
-  const [viewMode, setViewMode] = useState('records'); // 'records' or 'individual'
 
   // Model info hook kullanımı
   const modelInfo = useModelInfo(selectedModel);
@@ -102,7 +102,7 @@ export default function TestExecutionForm({
     console.log('Model changed to:', selectedModel);
   };
 
-  // Fetch process records
+  // Fetch process records - Not used anymore but kept for potential future use
   const fetchProcessRecords = useCallback(async (processName) => {
     if (!processName) {
       setProcessRecords([]);
@@ -117,15 +117,13 @@ export default function TestExecutionForm({
       if (data.success) {
         setProcessRecords(data.records || []);
         setSelectedRecords([]); // Clear previous selections
-        toast.success(`Found ${data.records.length} records for process: ${processName}`);
+        // Removed toast notification
       } else {
         setProcessRecords([]);
-        toast.error('Failed to load process records');
       }
     } catch (error) {
       console.error('Error fetching process records:', error);
       setProcessRecords([]);
-      toast.error('Failed to load process records');
     } finally {
       setIsLoadingRecords(false);
     }
@@ -183,11 +181,11 @@ export default function TestExecutionForm({
   // Handle individual test selection
   const handleTestSelection = (testId, isSelected) => {
     setSelectedTests(prev => {
-      if (isSelected) {
-        return [...prev, testId];
-      } else {
-        return prev.filter(id => id !== testId);
-      }
+      const newSelection = isSelected 
+        ? [...prev, testId]
+        : prev.filter(id => id !== testId);
+      
+      return newSelection;
     });
   };
 
@@ -226,16 +224,11 @@ export default function TestExecutionForm({
 
 
 
-  // Execute tests
+  // Execute tests - Moved from Execute Selected button to Run Process
   const executeTests = async () => {
-    // Check if records/tests are selected based on view mode
-    if (viewMode === 'records' && selectedRecords.length === 0) {
-      toast.error('Please select at least one record to execute');
-      return;
-    }
-    
-    if (viewMode === 'individual' && selectedTests.length === 0) {
-      toast.error('Please select at least one individual test to execute');
+    // Check if tests are selected
+    if (selectedTests.length === 0) {
+      toast.error('Please select at least one test to execute');
       return;
     }
 
@@ -245,7 +238,7 @@ export default function TestExecutionForm({
     
     if (selectedModelInfo?.type === 'api') {
       // Gemini modeller için Google API key kullan
-      if (selectedModel.includes('gemini')) {
+      if (selectedModel.startsWith('gemini')) {
         apiKey = apiKeys.google;
         if (!apiKey) {
           toast.error('Gemini API key is required. Please configure it in API Settings.');
@@ -268,39 +261,53 @@ export default function TestExecutionForm({
     setIsExecuting(true);
     
     // Create initial output with loading state
-    const selectedCount = viewMode === 'records' ? selectedRecords.length : selectedTests.length;
-    const selectedType = viewMode === 'records' ? 'test records' : 'individual tests';
+    const selectedCount = selectedTests.length;
     
     const loadingOutput = {
       status: 'running',
-      content: `🔄 Executing ${selectedCount} selected ${selectedType} with ${selectedModelInfo?.name || selectedModel}...\n\nModel: ${selectedModel}\nType: ${selectedModelInfo?.type || 'unknown'}\nProcess: ${selectedProcessName}\nSelection Mode: ${viewMode}\nSelected ${selectedType}: ${selectedCount}\n\nPlease wait...`,
+      content: `🔄 **Executing ${selectedCount} Selected Test${selectedCount > 1 ? 's' : ''}**
+
+⚙️ **Configuration:**
+- Model: ${selectedModelInfo?.name || selectedModel}
+- Type: ${selectedModelInfo?.type || 'unknown'}
+- Process: ${selectedProcessName}
+- Selected tests: ${selectedCount}
+
+🧠 **Context-Aware Execution:**
+✅ Source code context is automatically extracted from the database
+✅ AI will receive both the test code AND the source code being tested
+✅ This enables smarter execution with full understanding of the test context
+
+📋 **Execution Strategy:**
+Each test will be executed individually to avoid context limit issues.
+This ensures reliable execution even with many tests.
+
+⏳ Please wait while the tests are being executed one by one...
+
+**Progress:** Executing tests (this may take a few moments)...`,
       timestamp: new Date().toISOString(),
       model: selectedModel,
       processType: 'Test Execution'
     };
 
     if (onSetOutput) {
-      onSetOutput(loadingOutput);
+      onSetOutput('test-execution', loadingOutput);
     }
 
     try {
-      let requestBody, endpoint;
-      
-      if (viewMode === 'records') {
-        requestBody = {
-          record_ids: selectedRecords,
-          model: selectedModel,
-          ...(apiKey ? { api_key: apiKey } : {})
-        };
-        endpoint = 'http://localhost:8000/api/test-execution/execute-selected';
-      } else {
-        requestBody = {
-          test_ids: selectedTests,
-          model: selectedModel,
-          ...(apiKey ? { api_key: apiKey } : {})
-        };
-        endpoint = 'http://localhost:8000/api/test-execution/execute-selected-tests';
-      }
+      const requestBody = {
+        test_ids: selectedTests,
+        model: selectedModel,
+        ...(apiKey ? { api_key: apiKey } : {})
+      };
+      const endpoint = 'http://localhost:8000/api/test-execution/execute-selected-tests';
+
+      console.log('[TestExecution] Sending request:', {
+        endpoint,
+        requestBody,
+        selectedTests,
+        selectedModel
+      });
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -310,12 +317,99 @@ export default function TestExecutionForm({
         body: JSON.stringify(requestBody),
       });
 
+      console.log('[TestExecution] Response status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[TestExecution] Error response:', errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
       const result = await response.json();
+      console.log('[TestExecution] Result:', result);
 
       if (result.success) {
+        // Parse batch results to show summary
+        const output = result.terminal_output || '';
+        
+        // Check if this is a batch execution result
+        const isBatchResult = output.includes('BATCH TEST EXECUTION RESULTS');
+        
+        let executionSummary;
+        
+        if (isBatchResult) {
+          // Extract summary from batch results
+          const summaryMatch = output.match(/Total Tests: (\d+)\s+✅ Successful: (\d+)\s+❌ Failed: (\d+)\s+Success Rate: ([\d.]+)%/);
+          
+          if (summaryMatch) {
+            const [, total, successful, failed, successRate] = summaryMatch;
+            
+            executionSummary = `✅ **Batch Test Execution Completed**
+
+📊 **Execution Summary:**
+- **Total Tests:** ${total}
+- **Successful:** ✅ ${successful}
+- **Failed:** ❌ ${failed}
+- **Success Rate:** ${successRate}%
+- **Model Used:** ${result.model_used || selectedModel}
+- **Model Type:** ${selectedModelInfo?.type || 'Unknown'}
+- **Timestamp:** ${new Date(result.timestamp).toLocaleString()}
+
+---
+
+📋 **Execution Strategy:**
+Each test was executed individually to avoid context limit issues.
+
+---
+
+📤 **Detailed Results:**
+
+\`\`\`
+${output}
+\`\`\`
+
+---
+
+${failed === '0' 
+  ? '🎉 **All tests passed successfully!**' 
+  : `⚠️ **${failed} test(s) failed.** Please review the detailed results above.`}`;
+          } else {
+            // Fallback if parsing fails
+            executionSummary = `✅ **Test Execution Completed**
+
+📤 **Results:**
+
+\`\`\`
+${output}
+\`\`\``;
+          }
+        } else {
+          // Single test or old format
+          executionSummary = `✅ **Test Execution Completed Successfully**
+
+📊 **Execution Summary:**
+- **Tests Executed:** ${selectedCount} test${selectedCount > 1 ? 's' : ''}
+- **Model Used:** ${result.model_used || selectedModel}
+- **Model Type:** ${selectedModelInfo?.type || 'Unknown'}
+- **Timestamp:** ${new Date(result.timestamp).toLocaleString()}
+- **Status:** ✓ Success
+
+---
+
+📤 **Test Execution Output:**
+
+\`\`\`
+${output}
+\`\`\`
+
+---
+
+🏁 **Execution completed successfully!**`;
+        }
+
         const successOutput = {
           status: 'completed',
-          content: `✅ Test Execution Completed Successfully\n\n📊 **Execution Details:**\n- Model: ${result.model_used || selectedModel}\n- Type: ${selectedModelInfo?.type || 'Unknown'}\n- Selection Mode: ${viewMode}\n- ${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)} Executed: ${selectedCount}\n- Timestamp: ${new Date(result.timestamp).toLocaleString()}\n\n📤 **Test Output:**\n\`\`\`\n${result.terminal_output || 'No output received'}\n\`\`\`\n\n🏁 Execution finished successfully.`,
+          content: executionSummary,
           timestamp: result.timestamp,
           model: result.model_used || selectedModel,
           model_used: result.model_used,
@@ -323,24 +417,97 @@ export default function TestExecutionForm({
         };
 
         if (onSetOutput) {
-          onSetOutput(successOutput);
+          onSetOutput('test-execution', successOutput);
         }
         
-        toast.success('Test execution completed!');
+        // Show appropriate toast message
+        if (isBatchResult && output.includes('❌ Failed:')) {
+          const failedMatch = output.match(/❌ Failed: (\d+)/);
+          const failedCount = failedMatch ? failedMatch[1] : '0';
+          if (failedCount !== '0') {
+            toast.warning(`Execution complete: ${failedCount} test(s) failed`);
+          } else {
+            toast.success(`All ${selectedCount} tests executed successfully!`);
+          }
+        } else {
+          toast.success(`${selectedCount} test${selectedCount > 1 ? 's' : ''} executed successfully!`);
+        }
       } else {
+        // Check if it's a context length error
+        const isContextError = result.error && (
+          result.error.includes('context length') || 
+          result.error.includes('context overflows') ||
+          result.error.includes('tokens when context')
+        );
+        
+        let errorContent;
+        if (isContextError) {
+          errorContent = `❌ **Context Length Exceeded**
+
+🔴 **Error Type:** Model Context Limit Exceeded
+
+**Problem:**
+The selected tests are too large for the current model's context window.
+
+**Error Details:**
+\`\`\`
+${result.error}
+\`\`\`
+
+**💡 Solutions:**
+
+1. **Use a Larger Model:**
+   - Switch to a model with larger context (e.g., 8K, 16K, or 32K tokens)
+   - Gemini models support up to 128K tokens
+   - Larger local models (70B+) often have bigger context windows
+
+2. **Reduce Test Selection:**
+   - Currently selected: ${selectedCount} tests
+   - Try selecting fewer tests (10-15 recommended for 4K context models)
+   - Run tests in smaller batches
+
+3. **Use Gemini API:**
+   - Gemini models have much larger context windows
+   - Better for executing many tests at once
+
+**Current Selection:**
+- Tests: ${selectedCount}
+- Approximate size: Check the size indicator above the test list`;
+        } else {
+          errorContent = `❌ **Test Execution Failed**
+
+🔴 **Error Details:**
+\`\`\`
+${result.error || 'Unknown error occurred'}
+\`\`\`
+
+**Troubleshooting:**
+- Check if the backend services are running
+- Verify your model is loaded in LM Studio
+- Ensure your API key is valid (for Gemini models)
+
+**Configuration:**
+- Model: ${selectedModel}
+- Tests: ${selectedCount}`;
+        }
+
         const errorOutput = {
           status: 'error',
-          content: `❌ Test Execution Failed\n\n🔴 **Error Details:**\n${result.error || 'Unknown error occurred'}\n\nPlease check your configuration and try again.`,
+          content: errorContent,
           timestamp: new Date().toISOString(),
           model: selectedModel,
           processType: 'Test Execution'
         };
 
         if (onSetOutput) {
-          onSetOutput(errorOutput);
+          onSetOutput('test-execution', errorOutput);
         }
         
-        toast.error('Test execution failed');
+        if (isContextError) {
+          toast.error('Context limit exceeded! Try fewer tests or a larger model.');
+        } else {
+          toast.error('Test execution failed');
+        }
       }
     } catch (error) {
       console.error('Execution error:', error);
@@ -354,7 +521,7 @@ export default function TestExecutionForm({
       };
 
       if (onSetOutput) {
-        onSetOutput(errorOutput);
+        onSetOutput('test-execution', errorOutput);
       }
       
       toast.error('Execution failed: Connection error');
@@ -368,6 +535,18 @@ export default function TestExecutionForm({
     fetchProcessNames();
     checkMcpStatus();
   }, []); // Remove functions from dependency array since they have empty deps
+
+  // Update TabPanel form state to enable/disable Run Process button
+  useEffect(() => {
+    if (onTestCaseGeneration) {
+      const canRun = selectedTests.length > 0 && selectedProcessName && !isExecuting;
+      onTestCaseGeneration({
+        canRun,
+        isRunning: isExecuting,
+        handleRun: canRun ? executeTests : null
+      });
+    }
+  }, [onTestCaseGeneration, selectedTests, selectedProcessName, isExecuting]);
 
 
 
@@ -391,16 +570,42 @@ export default function TestExecutionForm({
                 <p className="text-sm text-gray-600">
                   <span className="font-medium">Process Name:</span> {selectedProcessName || 'Not selected'}
                 </p>
-                <p className="text-sm text-gray-600 mt-1">
+                <p className="text-sm text-gray-600">
                   <span className="font-medium">Status:</span> 
                   <span className={clsx(
                     'ml-2 px-2 py-1 rounded-full text-xs',
-                    selectedProcessName && selectedRecords.length > 0
+                    selectedProcessName && selectedTests.length > 0
                       ? 'bg-green-100 text-green-800' 
                       : 'bg-red-100 text-red-800'
                   )}>
-                    {selectedProcessName && selectedRecords.length > 0 ? 'Ready' : 'Not Ready'}
+                    {selectedProcessName && selectedTests.length > 0 ? 'Ready' : 'Not Ready'}
                   </span>
+                </p>
+              </div>
+            </div>
+
+            {/* Context-Aware Execution Info */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                🧠 Context-Aware Execution
+              </label>
+              <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 text-xs text-blue-800">
+                    <span className="text-green-600 font-bold">✓</span>
+                    <span>Source code automatically extracted from database</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-blue-800">
+                    <span className="text-green-600 font-bold">✓</span>
+                    <span>AI receives both test code and source code</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-blue-800">
+                    <span className="text-green-600 font-bold">✓</span>
+                    <span>Tests executed with full context understanding</span>
+                  </div>
+                </div>
+                <p className="text-xs text-blue-700 mt-2 pt-2 border-t border-blue-200">
+                  <strong>Note:</strong> Source code context helps AI better understand what each test validates, leading to more accurate execution results.
                 </p>
               </div>
             </div>
@@ -504,7 +709,6 @@ export default function TestExecutionForm({
                 onChange={(e) => {
                   setSelectedProcessName(e.target.value);
                   if (e.target.value) {
-                    fetchProcessRecords(e.target.value);
                     fetchIndividualTests(e.target.value);
                   }
                 }}
@@ -538,259 +742,86 @@ export default function TestExecutionForm({
               </p>
             )}
           </div>
-
-          {/* View Mode Toggle */}
-          {selectedProcessName && (
-            <div className="mt-4 border-t pt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Selection Mode
-              </label>
-              <div className="flex space-x-4">
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="viewMode"
-                    value="records"
-                    checked={viewMode === 'records'}
-                    onChange={(e) => setViewMode(e.target.value)}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">By Records (Bulk)</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="viewMode"
-                    value="individual"
-                    checked={viewMode === 'individual'}
-                    onChange={(e) => setViewMode(e.target.value)}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">Individual Tests (Granular)</span>
-                </label>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                {viewMode === 'records' 
-                  ? 'Select entire test code generation sessions to execute all tests together'
-                  : 'Select individual tests from the generated test arrays for precise control'
-                }
-              </p>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Test Records Selection Section */}
-      {viewMode === 'records' && (
+      {/* Individual Tests Selection Section */}
       <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-medium text-gray-900 flex items-center">
             <DocumentTextIcon className="w-5 h-5 mr-2 text-gray-600" />
-            Test Records Selection
+            Individual Tests Selection
           </h3>
           <div className="flex space-x-2">
             {selectedProcessName && (
               <button
-                onClick={() => fetchProcessRecords(selectedProcessName)}
-                disabled={isLoadingRecords}
+                onClick={() => fetchIndividualTests(selectedProcessName)}
+                disabled={isLoadingTests}
                 className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50 flex items-center"
               >
                 <ArrowPathIcon className="w-3 h-3 mr-1" />
                 Reload
               </button>
             )}
-            {processRecords.length > 0 && (
-              <button
-                onClick={() => setShowCodePreview(!showCodePreview)}
-                className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center"
-              >
-                <DocumentTextIcon className="w-3 h-3 mr-1" />
-                {showCodePreview ? 'Hide' : 'Show'} Preview
-              </button>
+            {individualTests.length > 0 && (
+              <span className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded">
+                {individualTests.length} tests found
+              </span>
             )}
           </div>
         </div>
-        
-        {isLoadingRecords ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full mr-3"></div>
-            <span className="text-gray-600">Loading records...</span>
-          </div>
-        ) : processRecords.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            {selectedProcessName 
-              ? 'No records found for this process. Generate some test code first.' 
-              : 'Please select a process to view records.'}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Select All Controls */}
-            <div className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
-              <div className="flex items-center space-x-3">
-                <input
-                  type="checkbox"
-                  id="select-all"
-                  checked={selectedRecords.length === processRecords.length && processRecords.length > 0}
-                  onChange={(e) => handleSelectAll(e.target.checked)}
-                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                />
-                <label htmlFor="select-all" className="font-medium text-gray-700">
-                  Select All ({processRecords.length} records)
-                </label>
-              </div>
-              <div className="text-sm text-gray-600">
-                {selectedRecords.length} of {processRecords.length} selected
-              </div>
-            </div>
 
-            {/* Records List */}
-            <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-lg">
-              {processRecords.map((record, index) => (
-                <div
-                  key={record.id}
-                  className={clsx(
-                    'p-3 border-b border-gray-100 hover:bg-gray-50',
-                    selectedRecords.includes(record.id) && 'bg-blue-50',
-                    index === processRecords.length - 1 && 'border-b-0'
-                  )}
-                >
-                  <div className="flex items-start space-x-3">
-                    <input
-                      type="checkbox"
-                      id={`record-${record.id}`}
-                      checked={selectedRecords.includes(record.id)}
-                      onChange={(e) => handleRecordSelection(record.id, e.target.checked)}
-                      className="mt-1 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-medium text-gray-900">
-                          Record #{index + 1}
-                        </h4>
-                        <span className="text-xs text-gray-500">
-                          {new Date(record.timestamp).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="bg-gray-900 text-green-400 p-2 rounded text-xs font-mono overflow-x-auto">
-                        {record.code_snippet}
-                      </div>
-                      <div className="mt-2 text-xs text-gray-500">
-                        Session: {record.session_id} | Status: {record.status}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Combined Code Preview for Selected Records */}
-        {showCodePreview && selectedRecords.length > 0 && (
-        <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-medium text-gray-900 flex items-center">
-              <DocumentTextIcon className="w-5 h-5 mr-2 text-gray-600" />
-              Combined Code Preview ({selectedRecords.length} records)
-            </h3>
-            <button
-              onClick={() => setShowCodePreview(false)}
-              className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
-            >
-              Close Preview
-            </button>
-          </div>
-          
-          <div className="border rounded-lg overflow-hidden">
-            <div className="bg-gray-50 px-3 py-2 border-b text-xs text-gray-600 font-mono flex items-center justify-between">
-              <span>Combined Test Code</span>
-              <span>{selectedRecords.length} records selected</span>
-            </div>
-            <div className="p-4 bg-gray-900 text-green-400 text-sm overflow-x-auto max-h-96 font-mono">
-              {processRecords
-                .filter(record => selectedRecords.includes(record.id))
-                .map((record, index) => (
-                  <div key={record.id} className="mb-6">
-                    <div className="text-blue-400 mb-2">
-                      {`# ============================================`}
-                    </div>
-                    <div className="text-blue-400 mb-2">
-                      {`# Record ${index + 1}: ${record.session_id}`}
-                    </div>
-                    <div className="text-blue-400 mb-2">
-                      {`# Timestamp: ${new Date(record.timestamp).toLocaleString()}`}
-                    </div>
-                    <div className="text-blue-400 mb-4">
-                      {`# ============================================`}
-                    </div>
-                    <pre className="whitespace-pre-wrap">{record.full_code}</pre>
-                  </div>
-                ))}
-            </div>
-          </div>
-
-          <div className="mt-4 text-sm text-gray-600">
-            <p className="mb-2">
-              <span className="font-medium">Total Records:</span> {selectedRecords.length}
-            </p>
-            <p>
-              <span className="font-medium">Ready to execute:</span> 
-              <span className="ml-2 text-green-600">
-                Yes - Combined code will be sent to the selected AI model
-              </span>
-            </p>
-          </div>
-        </div>
-        )}
-      </div>
-      )}
-
-      {/* Individual Tests Selection Section */}
-      {viewMode === 'individual' && (
-        <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-medium text-gray-900 flex items-center">
-              <DocumentTextIcon className="w-5 h-5 mr-2 text-gray-600" />
-              Individual Tests Selection
-            </h3>
-            <div className="flex space-x-2">
-              {selectedProcessName && (
-                <button
-                  onClick={() => fetchIndividualTests(selectedProcessName)}
-                  disabled={isLoadingTests}
-                  className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50 flex items-center"
-                >
-                  <ArrowPathIcon className="w-3 h-3 mr-1" />
-                  Reload
-                </button>
-              )}
-              {individualTests.length > 0 && (
-                <span className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded">
-                  {individualTests.length} tests found
-                </span>
-              )}
-            </div>
-          </div>
-
-          {selectedProcessName && (
+        {selectedProcessName && (
             <div className="space-y-4">
               {/* Select All Tests */}
               {individualTests.length > 0 && (
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={selectedTests.length === individualTests.length}
-                      onChange={(e) => handleSelectAllTests(e.target.checked)}
-                      className="mr-2 rounded"
-                    />
-                    <span className="text-sm font-medium text-gray-700">
-                      Select All ({individualTests.length} tests)
-                    </span>
-                  </label>
-                  <span className="text-xs text-gray-500">
-                    {selectedTests.length} selected
-                  </span>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedTests.length === individualTests.length}
+                        onChange={(e) => handleSelectAllTests(e.target.checked)}
+                        className="mr-2 rounded"
+                      />
+                      <span className="text-sm font-medium text-gray-700">
+                        Select All ({individualTests.length} tests)
+                      </span>
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <span className={clsx(
+                        "text-xs font-medium px-2 py-1 rounded",
+                        selectedTests.length > 0 
+                          ? "bg-green-100 text-green-700"
+                          : "bg-gray-100 text-gray-600"
+                      )}>
+                        {selectedTests.length} selected
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {/* Size/Token Estimate - Info Only */}
+                  {selectedTests.length > 0 && (() => {
+                    const selectedTestObjects = individualTests.filter(t => selectedTests.includes(t.test_id));
+                    const totalChars = selectedTestObjects.reduce((sum, test) => sum + test.full_code.length, 0);
+                    const approxTokens = Math.ceil(totalChars / 4);
+                    
+                    return (
+                      <div className="p-2 rounded text-xs bg-blue-50 border border-blue-200">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-blue-900">
+                            📊 Selection Info:
+                          </span>
+                          <span className="text-blue-800">
+                            {(totalChars / 1000).toFixed(1)}K chars (~{approxTokens.toLocaleString()} tokens)
+                          </span>
+                        </div>
+                        <p className="text-blue-700 mt-1">
+                          ℹ️ Each test will be executed individually, avoiding context limit issues.
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -836,9 +867,39 @@ export default function TestExecutionForm({
                           <p className="text-xs text-gray-600 mb-1">
                             Session: {test.session_id}
                           </p>
-                          <div className="text-xs text-gray-700 bg-gray-100 rounded p-2 font-mono">
+                          
+                          {/* Test Code Snippet */}
+                          <div className="text-xs text-gray-700 bg-gray-100 rounded p-2 font-mono mb-2">
                             {test.code_snippet}
                           </div>
+                          
+                          {/* Source Code Context Expander */}
+                          {test.source_code && (
+                            <details className="mt-2" onClick={(e) => e.stopPropagation()}>
+                              <summary className="cursor-pointer text-xs font-medium text-blue-700 hover:text-blue-900 flex items-center gap-1">
+                                <span>📄 View Source Code Context</span>
+                                <span className="text-blue-600">(Click to expand)</span>
+                              </summary>
+                              <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-2">
+                                <p className="text-xs text-blue-700 mb-2">
+                                  <strong>Source code for this test:</strong>
+                                </p>
+                                <div className="bg-white border border-blue-300 rounded p-2 max-h-64 overflow-y-auto">
+                                  <pre className="text-xs font-mono text-gray-800 whitespace-pre-wrap">
+                                    {test.source_code.length > 500 
+                                      ? test.source_code.substring(0, 500) + "\n\n... (truncated, full source code will be sent to AI)"
+                                      : test.source_code}
+                                  </pre>
+                                </div>
+                              </div>
+                            </details>
+                          )}
+                          
+                          {!test.source_code && (
+                            <p className="text-xs text-gray-500 italic mt-1">
+                              ℹ️ No source code context available for this test
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -856,63 +917,6 @@ export default function TestExecutionForm({
               )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* Execution Controls */}
-      <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Execution Controls</h3>
-        
-        <div className="flex items-center justify-between">
-          <div className="flex-1 mr-4">
-            <p className="text-sm text-gray-600 mb-2">
-              Click the button below to execute the selected {viewMode === 'records' ? 'test records' : 'individual tests'} using the chosen AI model.
-              Results will appear in the output panel on the right.
-            </p>
-            <div className="text-xs text-gray-500">
-              <span className="font-medium">Selected Model:</span> {selectedModel} | 
-              <span className="font-medium ml-2">Type:</span> {availableModels.find(m => m.key === selectedModel)?.type || 'Unknown'} | 
-              <span className="font-medium ml-2">
-                {viewMode === 'records' ? 'Records' : 'Tests'}:
-              </span> {viewMode === 'records' ? `${selectedRecords.length}/${processRecords.length}` : `${selectedTests.length}/${individualTests.length}`}
-            </div>
-          </div>
-
-          <button
-            onClick={executeTests}
-            disabled={disabled || isExecuting || (viewMode === 'records' ? selectedRecords.length === 0 : selectedTests.length === 0)}
-            className={clsx(
-              'flex items-center space-x-2 px-6 py-3 rounded-lg font-medium transition-all duration-200',
-              disabled || isExecuting || (viewMode === 'records' ? selectedRecords.length === 0 : selectedTests.length === 0)
-                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-lg transform hover:scale-105'
-            )}
-          >
-            {isExecuting ? (
-              <>
-                <div className="animate-spin w-5 h-5 border-2 border-current border-t-transparent rounded-full" />
-                <span>Executing...</span>
-              </>
-            ) : (
-              <>
-                <PlayIcon className="w-5 h-5" />
-                <span>Execute Selected ({selectedRecords.length})</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {(disabled || selectedRecords.length === 0) && (
-          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <p className="text-sm text-yellow-800">
-              <span className="font-medium">⚠️ Execution not available:</span>
-              {selectedRecords.length === 0
-                ? ' No records selected. Please select at least one record to execute.' 
-                : ' Process is currently disabled.'
-              }
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -923,5 +927,6 @@ TestExecutionForm.propTypes = {
   onSetOutput: PropTypes.func,
   managedFiles: PropTypes.array,
   disabled: PropTypes.bool,
-  process: PropTypes.object
+  process: PropTypes.object,
+  onTestCaseGeneration: PropTypes.func // Yeni prop type
 };

@@ -179,22 +179,31 @@ export const processes = [
     id: 'test-reporting',
     name: 'Test Reporting',
     details: [
-      'Generate detailed test execution reports',
-      'Analyze test results and metrics',
-      'Provide recommendations and insights'
+      'Generate comprehensive reports from STLC process data',
+      'AI-powered analysis with smart chunking for large datasets',
+      'Supports multi-process analysis and synthesis',
+      'Provides executive summaries and detailed insights',
+      'Includes metrics, trends, and actionable recommendations',
+      'Flexible reporting with configurable analysis depth'
     ],
-    inputs: ['Test Execution Results'],
-    output: 'Test Report'
+    inputs: ['Session Data', 'Selected Processes'],
+    output: 'Comprehensive Test Report'
   },
   {
     id: 'test-closure',
     name: 'Test Closure',
     details: [
-      'Verify all testing activities are completed',
-      'Archive test artifacts and documentation',
-      'Conduct lessons learned and process improvement'
+      'Generate AI-powered test cycle closure reports analyzing all STLC phases',
+      'Aggregate metrics from test scenarios, cases, execution, and defects',
+      'Calculate pass rates, coverage metrics, and optimization effectiveness',
+      'Provide executive summaries with quality assessment and recommendations',
+      'Identify lessons learned and areas for improvement in future cycles',
+      'Include comprehensive defect analysis and risk assessment',
+      'Generate actionable recommendations for stakeholders',
+      'Support multi-session analysis for complete project closure'
     ],
-    inputs: ['Test Report', 'Test Execution Results'],
-    output: 'Test Closure Report'
+    inputs: ['Test Sessions', 'Test Execution Results', 'All STLC Process Data'],
+    output: 'AI-Generated Test Closure Report',
+    defaultPrompt: 'Generate a comprehensive test closure report with metrics, quality assessment, and recommendations.'
   }
 ];

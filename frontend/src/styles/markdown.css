@@ -1,0 +1,198 @@
+/* Markdown Rendering Improvements for Test Reports */
+
+.test-report-markdown {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6;
+  color: #1f2937;
+}
+
+/* Headings - Compact spacing */
+.test-report-markdown h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: #111827;
+  border-bottom: 2px solid #e5e7eb;
+  padding-bottom: 0.5rem;
+}
+
+.test-report-markdown h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: #1f2937;
+}
+
+.test-report-markdown h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.4rem;
+  color: #374151;
+}
+
+.test-report-markdown h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 0.75rem;
+  margin-bottom: 0.3rem;
+  color: #4b5563;
+}
+
+/* Paragraphs - Reduced spacing */
+.test-report-markdown p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Lists - Compact */
+.test-report-markdown ul,
+.test-report-markdown ol {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-left: 1.5rem;
+}
+
+.test-report-markdown li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Nested lists */
+.test-report-markdown li > ul,
+.test-report-markdown li > ol {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Tables - Professional styling */
+.test-report-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.test-report-markdown thead {
+  background-color: #f3f4f6;
+}
+
+.test-report-markdown th {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: #374151;
+  border-bottom: 2px solid #d1d5db;
+}
+
+.test-report-markdown td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.test-report-markdown tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+/* Code blocks - Compact */
+.test-report-markdown pre {
+  background-color: #f3f4f6;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.test-report-markdown code {
+  background-color: #f3f4f6;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.test-report-markdown pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+/* Blockquotes */
+.test-report-markdown blockquote {
+  border-left: 4px solid #6366f1;
+  padding-left: 1rem;
+  margin: 0.75rem 0;
+  color: #4b5563;
+  font-style: italic;
+}
+
+/* Horizontal rules - Compact */
+.test-report-markdown hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 1rem 0;
+}
+
+/* Strong/Bold */
+.test-report-markdown strong {
+  font-weight: 600;
+  color: #111827;
+}
+
+/* Links */
+.test-report-markdown a {
+  color: #4f46e5;
+  text-decoration: none;
+}
+
+.test-report-markdown a:hover {
+  text-decoration: underline;
+}
+
+/* First element no top margin */
+.test-report-markdown > *:first-child {
+  margin-top: 0;
+}
+
+/* Last element no bottom margin */
+.test-report-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Compact mode for dense information */
+.test-report-markdown-compact h1 {
+  font-size: 1.5rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.test-report-markdown-compact h2 {
+  font-size: 1.2rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.test-report-markdown-compact h3 {
+  font-size: 1rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.test-report-markdown-compact p,
+.test-report-markdown-compact ul,
+.test-report-markdown-compact ol {
+  margin-top: 0.3rem;
+  margin-bottom: 0.3rem;
+}
+
+.test-report-markdown-compact table {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}

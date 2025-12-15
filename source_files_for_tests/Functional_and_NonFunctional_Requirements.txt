@@ -1,0 +1,21 @@
+Functional Requirements
+------------------------
+FR1. The system shall detect the type of object (SODA or WATER) using distance sensors (D1 and D2).
+FR2. The gripper shall OPEN and CLOSE according to the object type detected.
+FR3. The robot shall grasp the product once it is detected.
+FR4. The robot shall move from BANDi to HOMEi after grasping the object.
+FR5. The robot shall place SODA in REDi and WATER in WHITEi.
+FR6. The robot shall move back to BANDi via HOMEi after delivering the object.
+FR7. The robot controller shall determine state transitions (INIT, BAND, HOME, RED, WHITE, MOVING).
+FR8. The system shall ensure robots do not collide by satisfying safety constraints RQ1–RQ5.
+
+Non-Functional Requirements
+----------------------------
+NFR1. Safety: The robot must not move to REDi or WHITEi when another robot is in or moving to the same area.
+NFR2. Real-Time Responsiveness: Sensor readings and state transitions should be updated within the control timestep.
+NFR3. Reliability: The system must consistently detect and classify products correctly under normal operating conditions.
+NFR4. Modularity: Components such as gripper, robot controller, product detector, and conveyor must be independently modelled.
+NFR5. Verifiability: The system must be verifiable using formal verification techniques such as timed automata and model checking.
+NFR6. Scalability: The architecture should allow extension to more robots with similar interaction protocols.
+NFR7. Maintainability: Software components should follow structured design with clear state transitions and modular architecture.
+NFR8. Determinism: The behavior of gripper and robot controller should produce predictable outcomes under the same inputs.

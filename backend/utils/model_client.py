@@ -9,6 +9,7 @@ import logging
 from langchain_openai import ChatOpenAI
 import sys
 import os
+import aiohttp
 # Add the backend directory to the path to import config
 backend_dir = os.path.dirname(os.path.dirname(__file__))
 if backend_dir not in sys.path:
@@ -408,33 +409,35 @@ class LLMClient:
             self.logger.debug(f"Request payload: {payload}")
             self.logger.info(f"Making POST request to: {self.api_url}/chat/completions")
             
-            # Add timeout configuration to prevent hanging
-            response = requests.post(
-                f"{self.api_url}/chat/completions", 
-                json=payload, 
-                timeout=300  # 300 second timeout (5 minutes) for complex test case generation
-            )
-            response.raise_for_status()
-            
-            self.logger.debug(f"Response status code: {response.status_code}")
-            response_json = response.json()
-            self.logger.debug(f"Response JSON keys: {list(response_json.keys())}")
-            
-            if "choices" not in response_json or not response_json["choices"]:
-                self.logger.error(f"Invalid response format: {response_json}")
-                raise ValueError("Invalid response format from LLM API")
-            
-            result = response_json["choices"][0]["message"]["content"]
-            self.logger.info(f"Successfully generated response with model: {actual_model}")
-            return result
-        except requests.Timeout as e:
+            # Use aiohttp for async requests with extended timeout for complex test case generation
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.api_url}/chat/completions",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=1200)  # 1200 second timeout (20 minutes) for complex test case generation
+                ) as response:
+                    response.raise_for_status()
+                    
+                    self.logger.debug(f"Response status code: {response.status}")
+                    response_json = await response.json()
+                    self.logger.debug(f"Response JSON keys: {list(response_json.keys())}")
+                    
+                    if "choices" not in response_json or not response_json["choices"]:
+                        self.logger.error(f"Invalid response format: {response_json}")
+                        raise ValueError("Invalid response format from LLM API")
+                    
+                    result = response_json["choices"][0]["message"]["content"]
+                    self.logger.info(f"Successfully generated response with model: {actual_model}")
+                    return result
+                    
+        except asyncio.TimeoutError as e:
             self.logger.error(f"Timeout error when calling LLM API with model {actual_model}: {str(e)}")
-            raise TimeoutError(f"LLM API request timed out after 300 seconds (5 minutes)")
-        except requests.RequestException as e:
+            raise TimeoutError(f"LLM API request timed out after 1200 seconds (20 minutes)")
+        except aiohttp.ClientError as e:
             self.logger.error(f"LLM API Error with model {actual_model}: {str(e)}")
-            if hasattr(e, 'response') and e.response is not None:
-                self.logger.error(f"Response status: {e.response.status_code}")
-                self.logger.error(f"Response text: {e.response.text}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Unexpected error with model {actual_model}: {str(e)}")
             raise
 
     def _sanitize_prompt_for_gemini(self, prompt):

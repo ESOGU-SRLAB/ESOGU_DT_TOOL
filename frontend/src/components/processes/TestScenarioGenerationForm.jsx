@@ -668,6 +668,9 @@ Generate the test scenarios now following the exact JSON structure above.`;
 
         await runFunction(processIdToUse, runConfig);
         toast.success('🎉 Test scenarios generated successfully!');
+        
+        // Return immediately to prevent fallback from running
+        return;
       } else {
         // Fallback to direct service call
         const formData = new FormData();

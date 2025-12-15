@@ -408,7 +408,7 @@ class DataValidator:
         print("⚠️ Content exceeds 4000 tokens - system should auto-switch to qwen2.5:7b-1m")
     
     try:
-        response = requests.post(url, json=payload, timeout=300)  # 5 minutes timeout
+        response = requests.post(url, json=payload, timeout=1200)  # 20 minutes timeout
         print(f"\nResponse status: {response.status_code}")
         
         if response.status_code == 200:

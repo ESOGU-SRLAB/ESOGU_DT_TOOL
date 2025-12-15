@@ -110,7 +110,7 @@ Key performance enhancements include:
 
 1. **Repository Clone and Setup**
 ```bash
-git clone https://github.com/cembglm/temp-stlc.git
+git clone https://github.com/cembglm/stlc-man.git
 cd STLC-Manager
 ```
 

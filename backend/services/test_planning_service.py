@@ -144,8 +144,8 @@ class TestPlanningService:
             if not final_plan:
                 raise ValueError("Failed to generate test planning")
 
-            # Clean and format the result
-            final_plan = self._format_planning_output(final_plan)
+            # Parse and process JSON response
+            final_plan = self._process_test_planning_response(final_plan, today)
                 
             file_names = [os.path.basename(path) for path in file_paths]
             files_header = "Files analyzed:\n" + "\n".join(file_names)
@@ -248,4 +248,120 @@ class TestPlanningService:
         for msg in technical_messages:
             result = result.replace(msg, '').strip()
         
-        return result 
+        return result
+    
+    def _process_test_planning_response(self, response, today):
+        """Process LLM response and ensure it's in the correct JSON format with calculated dates"""
+        import re
+        import json
+        from datetime import datetime, timedelta
+        
+        if not response:
+            return ""
+        
+        self.logger.debug("Processing test planning response...")
+        
+        # Try to extract JSON from the response
+        json_match = re.search(r'\[[\s\S]*\]', response)
+        
+        if json_match:
+            try:
+                json_str = json_match.group(0)
+                # Parse JSON
+                tasks = json.loads(json_str)
+                
+                # Validate it's a list
+                if not isinstance(tasks, list):
+                    self.logger.warning("Parsed JSON is not a list, treating as text response")
+                    return self._format_planning_output(response)
+                
+                # Process dates in each task
+                base_date = datetime.strptime(today, "%Y-%m-%d")
+                current_end_date = base_date  # Track the last end date for sequential tasks
+                
+                for task in tasks:
+                    if isinstance(task, dict):
+                        duration = task.get("Duration (days)", 5)  # Default 5 days if not specified
+                        
+                        # Try to parse duration as integer
+                        try:
+                            duration = int(duration)
+                        except (ValueError, TypeError):
+                            self.logger.warning(f"Invalid duration value: {duration}, using default 5 days")
+                            duration = 5
+                        
+                        # Ensure minimum duration of 1 day
+                        if duration < 1:
+                            duration = 1
+                        
+                        # Calculate Start Date
+                        if "Start Date" in task:
+                            start_date_str = task["Start Date"]
+                            calculated_start = self._calculate_date(start_date_str, base_date)
+                            
+                            # If calculated start is same as base_date and we have previous tasks,
+                            # start after the last task
+                            if calculated_start == base_date and current_end_date > base_date:
+                                task["Start Date"] = current_end_date.strftime("%Y-%m-%d")
+                            else:
+                                task["Start Date"] = calculated_start
+                        else:
+                            # No start date specified, use end of previous task
+                            task["Start Date"] = current_end_date.strftime("%Y-%m-%d")
+                        
+                        # Calculate End Date based on Start Date + Duration
+                        start_date = datetime.strptime(task["Start Date"], "%Y-%m-%d")
+                        end_date = start_date + timedelta(days=duration - 1)  # -1 because start day is included
+                        task["End Date"] = end_date.strftime("%Y-%m-%d")
+                        
+                        # Update current_end_date for next task (add 1 day gap)
+                        current_end_date = end_date + timedelta(days=1)
+                        
+                        self.logger.debug(f"Task '{task.get('Task Name', 'Unknown')}': {task['Start Date']} to {task['End Date']} ({duration} days)")
+                
+                # Convert back to formatted JSON string for display
+                formatted_json = json.dumps(tasks, indent=2, ensure_ascii=False)
+                self.logger.info("Successfully processed test planning JSON response")
+                return formatted_json
+                
+            except json.JSONDecodeError as e:
+                self.logger.warning(f"Failed to parse JSON from response: {e}")
+                # Fallback to text formatting
+                return self._format_planning_output(response)
+        else:
+            self.logger.warning("No JSON array found in response, treating as text")
+            # If no JSON found, return formatted text
+            return self._format_planning_output(response)
+    
+    def _calculate_date(self, date_expression, base_date):
+        """Calculate actual date from expressions like '{today}+5' or direct dates"""
+        import re
+        from datetime import timedelta
+        
+        if not date_expression:
+            return base_date.strftime("%Y-%m-%d")
+        
+        # Check if it's a date offset expression like "{today}+5"
+        offset_match = re.search(r'\{today\}\s*\+\s*(\d+)', str(date_expression))
+        
+        if offset_match:
+            days_offset = int(offset_match.group(1))
+            calculated_date = base_date + timedelta(days=days_offset)
+            return calculated_date.strftime("%Y-%m-%d")
+        
+        # Check if it's already a proper date format (YYYY-MM-DD)
+        date_match = re.match(r'\d{4}-\d{2}-\d{2}', str(date_expression))
+        if date_match:
+            return str(date_expression)
+        
+        # Try to parse as integer (days offset without format)
+        try:
+            days_offset = int(date_expression)
+            calculated_date = base_date + timedelta(days=days_offset)
+            return calculated_date.strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            pass
+        
+        # If nothing matches, use base date
+        self.logger.warning(f"Could not parse date expression: {date_expression}, using base date")
+        return base_date.strftime("%Y-%m-%d") 

@@ -32,6 +32,64 @@ MCP_SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8001"))
 LM_STUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
 DEFAULT_LM_STUDIO_MODEL = os.getenv("DEFAULT_LM_STUDIO_MODEL", "llama-3.2-3b-instruct")
 
+# Model name mapping: Frontend model key -> LM Studio format
+MODEL_NAME_MAPPING = {
+    # Small models
+    "llama3.2:1b": "llama-3.2-1b-instruct",
+    "llama3.2:3b": "llama-3.2-3b-instruct",
+    "llama3.1:8b": "llama-3.1-8b-instruct",
+    "codellama:7b": "codellama-7b-instruct",
+    "codellama:13b": "codellama-13b-instruct",
+    "codellama:34b": "codellama-34b-instruct",
+    "deepseek-coder:6.7b": "deepseek-coder-6.7b-instruct",
+    "gemma2:2b": "gemma-2-2b-it",
+    "gemma3:4b": "gemma-3-4b-it",
+    "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
+    "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",
+    "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
+    "stable-code:3b": "stable-code-instruct-3b",
+    "starcoder2:7b": "starcoder2-7b",
+    "codegeex4:9b": "codegeex4-all-9b",
+    
+    # Large models with full paths
+    "codellama:70b-instruct": "CodeLlama-70B-Instruct-GGUF/codellama-70b-instruct.Q4_K_S.gguf",
+    "kimi-dev:72b": "Kimi-Dev-72B-GGUF/Kimi-Dev-72B-Q3_K_S.gguf",
+    "openai/gpt-oss-20b": "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b": "openai/gpt-oss-120b",
+    "deepseek-r1-distill:32b": "DeepSeek-R1-Distill-Qwen-32B-GGUF/DeepSeek-R1-Distill-Qwen-32B-Q3_K_L.gguf",
+    "google/gemma-3-12b": "gemma-3-12b-it",
+    "google/gemma-3-27b": "google/gemma-3-27b",
+    "qwen/qwq-32b": "qwen/qwq-32b",
+    "qwen/qwen3-14b": "qwen3-14b-instruct",
+    "qwen/qwen3-coder-30b": "qwen/qwen3-coder-30b",
+    "deepseek/deepseek-r1-qwen3-8b": "deepseek/deepseek-r1-0528-qwen3-8b",
+    "meta/llama-3.3-70b": "meta/llama-3.3-70b",
+    "mistralai/codestral-22b-v0.1": "mistralai/codestral-22b-v0.1",
+    
+    # Alternative formats
+    "llama-3.2-3b-instruct": "llama-3.2-3b-instruct"
+}
+
+def convert_model_name_to_lm_studio(ollama_model: str) -> str:
+    """
+    Convert Ollama-style model name to LM Studio format
+    Example: llama3.2:3b -> llama-3.2-3b-instruct
+    """
+    # Check if we have a direct mapping
+    if ollama_model in MODEL_NAME_MAPPING:
+        return MODEL_NAME_MAPPING[ollama_model]
+    
+    # If not in mapping, try to convert format
+    # Replace : with - and dots with -
+    converted = ollama_model.replace(":", "-").replace(".", "-")
+    
+    # Add -instruct suffix if not present
+    if not converted.endswith("-instruct"):
+        converted += "-instruct"
+    
+    logger.warning(f"No mapping found for {ollama_model}, using converted name: {converted}")
+    return converted
+
 app = FastAPI(title="MCP Test Execution Server", version="1.0.0")
 
 class JsonRpcRequest(BaseModel):
@@ -53,20 +111,34 @@ class TestExecuteParams(BaseModel):
     provider: str  # "lm_studio" or "gemini"
     api_key: Optional[str] = None  # Required for Gemini
     model_name: Optional[str] = None  # Optional model override
+    source_code: Optional[str] = None  # Optional source code for context-aware execution
 
 class MCPServer:
     def __init__(self):
         self.session_id = str(uuid.uuid4())
-        self.execution_prompt = self._get_execution_prompt()
     
-    def _get_execution_prompt(self) -> str:
-        """Get the standard MCP execution prompt"""
-        return """You are operating inside the STLC Manager project as a Model Context Protocol (MCP) execution agent.
+    def _get_execution_prompt(self, source_code: Optional[str] = None) -> str:
+        """Get the standard MCP execution prompt with optional source code context"""
+        base_prompt = """You are operating inside the STLC Manager project as a Model Context Protocol (MCP) execution agent.
 Your task is to execute the following test code and return only the raw execution results
 exactly as a terminal would show. Do not add explanations or formatting.
+"""
+        
+        if source_code:
+            base_prompt += f"""
+This test was written for the following source code. Use it as context to better understand and execute the test:
 
+SOURCE CODE:
+{source_code}
+
+================================================================================
+
+"""
+        
+        base_prompt += """
 Test Code to Execute:
 """
+        return base_prompt
 
     async def execute_test(self, params: TestExecuteParams) -> Dict[str, Any]:
         """
@@ -95,14 +167,20 @@ Test Code to Execute:
     async def _execute_via_lm_studio(self, params: TestExecuteParams) -> Dict[str, Any]:
         """Execute test code via LM Studio local API"""
         try:
-            model_name = params.model_name or DEFAULT_LM_STUDIO_MODEL
+            # Convert model name from Ollama format to LM Studio format
+            ollama_model = params.model_name or "llama3.2:3b"
+            lm_studio_model = convert_model_name_to_lm_studio(ollama_model)
             
-            # Construct the full prompt
-            full_prompt = self.execution_prompt + params.test_code
+            logger.info(f"[LM Studio] Model conversion: {ollama_model} -> {lm_studio_model}")
+            logger.info(f"[LM Studio] Source code context: {bool(params.source_code)}")
+            
+            # Construct the full prompt with optional source code context
+            execution_prompt = self._get_execution_prompt(params.source_code)
+            full_prompt = execution_prompt + params.test_code
             
             # Prepare LM Studio API request
             payload = {
-                "model": model_name,
+                "model": lm_studio_model,
                 "messages": [
                     {
                         "role": "system",
@@ -118,6 +196,9 @@ Test Code to Execute:
                 "stream": False
             }
             
+            logger.info(f"[LM Studio] Sending request to {LM_STUDIO_BASE_URL}/v1/chat/completions")
+            logger.info(f"[LM Studio] Using model: {lm_studio_model}")
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{LM_STUDIO_BASE_URL}/v1/chat/completions",
@@ -125,9 +206,11 @@ Test Code to Execute:
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
                     if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"[LM Studio] API error {response.status}: {error_text}")
                         raise HTTPException(
                             status_code=response.status,
-                            detail=f"LM Studio API error: {await response.text()}"
+                            detail=f"LM Studio API error: {error_text}"
                         )
                     
                     result = await response.json()
@@ -137,11 +220,13 @@ Test Code to Execute:
                     
                     terminal_output = result["choices"][0]["message"]["content"]
                     
+                    logger.info(f"[LM Studio] Execution successful")
+                    
                     return {
                         "success": True,
                         "terminal_output": terminal_output,
                         "provider": "lm_studio",
-                        "model_used": model_name,
+                        "model_used": lm_studio_model,
                         "timestamp": datetime.now().isoformat(),
                         "token_usage": result.get("usage", {})
                     }
@@ -163,8 +248,11 @@ Test Code to Execute:
             model_name = params.model_name or "gemini-1.5-flash"
             model = genai.GenerativeModel(model_name)
             
-            # Construct the full prompt
-            full_prompt = self.execution_prompt + params.test_code
+            logger.info(f"[Gemini] Source code context: {bool(params.source_code)}")
+            
+            # Construct the full prompt with optional source code context
+            execution_prompt = self._get_execution_prompt(params.source_code)
+            full_prompt = execution_prompt + params.test_code
             
             # Generate response
             response = await asyncio.to_thread(

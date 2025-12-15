@@ -8,7 +8,7 @@ Her adımın giriş-çıkış verilerini yönetir ve son toplu çıktıyı oluş
 from stlc import (
     code_review, requirement_analysis, test_planning, test_scenario_generation,
     test_scenario_optimization, test_case_generation, test_case_optimization,
-    test_code_generation, environment_setup, test_execution, test_reporting, test_closure
+    test_code_generation, environment_setup, execution, test_reporting, test_closure
 )
 from pipeline.pipeline_controller import determine_pipeline
 
@@ -23,7 +23,7 @@ STLC_MODULE_MAP = {
     "testCaseOptimization": test_case_optimization,
     "testCodeGeneration": test_code_generation,
     "environmentSetup": environment_setup,
-    "testExecution": test_execution,
+    "testExecution": execution,
     "testReporting": test_reporting,
     "testClosure": test_closure
 }

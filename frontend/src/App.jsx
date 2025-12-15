@@ -988,6 +988,9 @@ function AppContents() {
 					timestamp: new Date().toISOString()
 				}
 			}));
+			
+			// Re-throw the error to prevent fallback retry
+			throw error;
 		}
 	};
 

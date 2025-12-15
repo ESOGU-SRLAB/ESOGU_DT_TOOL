@@ -61,7 +61,7 @@ Below is an example JSON structure to follow:
     {{
         "Task Name": "Test Environment and Tool Setup",
         "Description": "Define and set up the test environment, including hardware, software, network configurations, and necessary test tools, ensuring full compliance with ISTQB guidelines.",
-        "Start Date": "{today}+15,
+        "Start Date": "{today}+15",
         "End Date": "{today}+19",
         "Duration (days)": 5
     }}
@@ -649,6 +649,67 @@ def get_environment_setup_system_suffix():
             "}}\n\n"
             "Source Code:\n{code}\n"
             "Requirement Document:\n{requirement_document}"
+        )
+
+def get_test_execution_system_suffix():
+    logger.info("test_execution system_suffix çekiliyor.")
+    try:
+        db = get_db()
+        collection = db["test_execution_prompt"]
+        document = collection.find_one({"process_type": "test_execution"})
+        if document and document.get("system_suffix"):
+            return document.get("system_suffix")
+        else:
+            logger.warning("test_execution için system_suffix bulunamadı, default değer döndürüldü.")
+            return (
+                "Output Format:\n"
+                "Don't make any explanation, just give the json structure. Otherwise, the program may crash, just give the json structure.\n"
+                "You must output your result in JSON format with the following structure:\n\n"
+                "{{\n"
+                "  \"test_execution\": {{\n"
+                "    \"execution_status\": \"success|failed|partial\",\n"
+                "    \"tests_run\": 10,\n"
+                "    \"tests_passed\": 8,\n"
+                "    \"tests_failed\": 2,\n"
+                "    \"execution_time\": \"1.5s\",\n"
+                "    \"results\": [\n"
+                "      {{\n"
+                "        \"test_name\": \"test_example\",\n"
+                "        \"status\": \"passed|failed\",\n"
+                "        \"execution_time\": \"0.2s\",\n"
+                "        \"error_message\": \"error details if failed\"\n"
+                "      }}\n"
+                "    ],\n"
+                "    \"coverage\": \"85%\",\n"
+                "    \"recommendations\": [\n"
+                "      \"Fix failed test cases\",\n"
+                "      \"Improve test coverage\"\n"
+                "    ]\n"
+                "  }}\n"
+                "}}\n\n"
+                "Test Code:\n{test_code}\n"
+                "Execution Results:\n{execution_results}"
+            )
+    except Exception as e:
+        logger.error(f"system_suffix çekilirken hata oluştu: {str(e)}")
+        return (
+            "Output Format:\n"
+            "Don't make any explanation, just give the json structure. Otherwise, the program may crash, just give the json structure.\n"
+            "You must output your result in JSON format with the following structure:\n\n"
+            "{{\n"
+            "  \"test_execution\": {{\n"
+            "    \"execution_status\": \"success|failed|partial\",\n"
+            "    \"tests_run\": 10,\n"
+            "    \"tests_passed\": 8,\n"
+            "    \"tests_failed\": 2,\n"
+            "    \"execution_time\": \"1.5s\",\n"
+            "    \"results\": [],\n"
+            "    \"coverage\": \"85%\",\n"
+            "    \"recommendations\": []\n"
+            "  }}\n"
+            "}}\n\n"
+            "Test Code:\n{test_code}\n"
+            "Execution Results:\n{execution_results}"
         )
 
 def save_prompt_generation_session(session_data):

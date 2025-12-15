@@ -224,7 +224,7 @@ class TestCodeGenerationService:
             logger.error(f"Error getting test cases from session history: {str(e)}")
             return []
     
-    async def analyze_source_code(self, source_files: List, api_key: str = None) -> Dict[str, Any]:
+    async def analyze_source_code(self, source_files: List, model_name: str = None, api_key: str = None) -> Dict[str, Any]:
         """
         Yüklenen source code'ları analiz eder
         """
@@ -283,7 +283,7 @@ class TestCodeGenerationService:
                 """
                 
                 try:
-                    llm_client = LLMClient(api_key=api_key, use_case='test_code_generation')
+                    llm_client = LLMClient(model_name=model_name, api_key=api_key, use_case='test_code_generation')
                     analysis_response = await llm_client.generate_response(
                         analysis_prompt,
                         temperature=0.1,
@@ -363,7 +363,7 @@ class TestCodeGenerationService:
                 return {"success": False, "error": "No unique test cases found for this process"}
             
             # 3. Source code'u analiz et
-            code_analysis = await self.analyze_source_code(source_files, api_key)
+            code_analysis = await self.analyze_source_code(source_files, model_name, api_key)
             if "error" in code_analysis:
                 return {"success": False, "error": f"Source code analysis failed: {code_analysis['error']}"}
             
@@ -551,9 +551,18 @@ class TestCodeGenerationService:
                 custom_prompt
             )
             
-            # Gemini API için özel timeout ayarları
+            # Model tipine göre timeout ayarları
             is_gemini = hasattr(llm_client, 'is_gemini') and llm_client.is_gemini
-            timeout_seconds = 180 if is_gemini else 60  # Gemini için 3 dakika, diğerleri için 1 dakika
+            
+            # Büyük modeller için daha uzun timeout (20B+ parametreli modeller yavaş olabilir)
+            is_large_model = any(size in llm_client.model_name.lower() for size in ['20b', '30b', '70b', '120b'])
+            
+            if is_gemini:
+                timeout_seconds = 180  # Gemini için 3 dakika
+            elif is_large_model:
+                timeout_seconds = 120  # Büyük local modeller için 2 dakika
+            else:
+                timeout_seconds = 60   # Küçük local modeller için 1 dakika
             
             logger.info(f"🚀 Sending request to {llm_client.model_name} with {timeout_seconds}s timeout")
             

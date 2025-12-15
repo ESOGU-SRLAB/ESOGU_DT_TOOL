@@ -9,6 +9,8 @@ import TestCaseGenerationForm from './processes/TestCaseGenerationForm';
 import TestCaseOptimization from './processes/TestCaseOptimization';
 import TestCodeGeneration from './processes/TestCodeGeneration';
 import TestExecutionForm from './processes/TestExecutionForm';
+import TestReportingForm from './processes/TestReportingForm';
+import TestClosureForm from './processes/TestClosureForm';
 import CodeReviewForm from './processes/CodeReviewForm';
 import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
@@ -82,6 +84,27 @@ export default function TabPanel({
   // Test Case Optimization results state for sidebar
   const [testCaseOptimizationResults, setTestCaseOptimizationResults] = useState(null);
 
+  // Test Execution form state tracking for main button
+  const [testExecutionFormState, setTestExecutionFormState] = useState({
+    canRun: false,
+    isRunning: false,
+    handleRun: null
+  });
+
+  // Test Reporting form state tracking for main button
+  const [testReportingFormState, setTestReportingFormState] = useState({
+    canRun: false,
+    isRunning: false,
+    handleRun: null
+  });
+
+  // Test Closure form state tracking for main button
+  const [testClosureFormState, setTestClosureFormState] = useState({
+    canRun: false,
+    isRunning: false,
+    handleRun: null
+  });
+
   // Stable callback for Test Case Optimization form state changes
   const handleTestCaseOptimizationStateChange = useCallback((handler) => {
     setTestCaseOptimizationFormState(prev => ({ ...prev, ...handler }));
@@ -136,14 +159,31 @@ export default function TabPanel({
       activeTab !== 'test-case-optimization' && // Test Case Optimization kendi prompt'unu yönetir
       !processPrompts[activeTab]
     ) {
-      // Code review için yeni endpoint ve veri yapısı
-      if (activeTab === 'code-review') {
-        fetch('http://localhost:8000/api/prompts/code-review')
+      // Code review, requirement-analysis, test-planning, environment-setup, test-execution, test-reporting ve test-closure için yeni endpoint ve veri yapısı
+      if (activeTab === 'code-review' || activeTab === 'requirement-analysis' || activeTab === 'test-planning' || activeTab === 'environment-setup' || activeTab === 'test-execution' || activeTab === 'test-reporting' || activeTab === 'test-closure') {
+        let endpoint;
+        if (activeTab === 'code-review') {
+          endpoint = 'http://localhost:8000/api/prompts/code-review';
+        } else if (activeTab === 'requirement-analysis') {
+          endpoint = 'http://localhost:8000/api/prompts/requirement-analysis';
+        } else if (activeTab === 'test-planning') {
+          endpoint = 'http://localhost:8000/api/prompts/test-planning';
+        } else if (activeTab === 'environment-setup') {
+          endpoint = 'http://localhost:8000/api/prompts/environment-setup';
+        } else if (activeTab === 'test-execution') {
+          endpoint = 'http://localhost:8000/api/prompts/test-execution';
+        } else if (activeTab === 'test-reporting') {
+          endpoint = 'http://localhost:8000/api/prompts/test-reporting';
+        } else if (activeTab === 'test-closure') {
+          endpoint = 'http://localhost:8000/api/prompts/test-closure';
+        }
+        
+        fetch(endpoint)
           .then(res => res.json())
           .then(data => {
-            if (data && data.prompt_text) {
+            if (data && (data.prompt_text || data.base_prompt)) {
               onPromptUpdate(activeTab, {
-                prompt_text: data.prompt_text,
+                prompt_text: data.prompt_text || data.base_prompt,
                 process_type: activeTab,
                 isTemporary: false
               });
@@ -193,8 +233,8 @@ export default function TabPanel({
       setTempPrompt(currentPrompt.prompt_text);
       return;
     }
-    // Code review, requirement-analysis, test-planning veya environment-setup için yeni endpoint ve veri yapısı
-    if (processId === 'code-review' || processId === 'requirement-analysis' || processId === 'test-planning' || processId === 'environment-setup') {
+    // Code review, requirement-analysis, test-planning, environment-setup veya test-execution için yeni endpoint ve veri yapısı
+    if (processId === 'code-review' || processId === 'requirement-analysis' || processId === 'test-planning' || processId === 'environment-setup' || processId === 'test-execution') {
       try {
         let endpoint;
         if (processId === 'code-review') {
@@ -205,6 +245,8 @@ export default function TabPanel({
           endpoint = 'http://localhost:8000/api/prompts/test-planning';
         } else if (processId === 'environment-setup') {
           endpoint = 'http://localhost:8000/api/prompts/environment-setup';
+        } else if (processId === 'test-execution') {
+          endpoint = 'http://localhost:8000/api/prompts/test-execution';
         }
         const response = await fetch(endpoint);
         if (!response.ok) {
@@ -213,7 +255,7 @@ export default function TabPanel({
         }
         const data = await response.json();
         setEditingPrompt(processId);
-        setTempPrompt(data.prompt_text);
+        setTempPrompt(data.prompt_text || data.base_prompt);
       } catch (error) {
         setEditingPrompt(processId);
         setTempPrompt(`Error: ${error.message}`);
@@ -294,8 +336,8 @@ Important:
       return;
     }
     
-    // Code review, requirement-analysis, test-planning veya environment-setup için yeni endpoint ve veri yapısı
-    if (processId === 'code-review' || processId === 'requirement-analysis' || processId === 'test-planning' || processId === 'environment-setup') {
+    // Code review, requirement-analysis, test-planning, environment-setup veya test-execution için yeni endpoint ve veri yapısı
+    if (processId === 'code-review' || processId === 'requirement-analysis' || processId === 'test-planning' || processId === 'environment-setup' || processId === 'test-execution') {
       try {
         let endpoint;
         if (processId === 'code-review') {
@@ -306,6 +348,8 @@ Important:
           endpoint = 'http://localhost:8000/api/prompts/test-planning';
         } else if (processId === 'environment-setup') {
           endpoint = 'http://localhost:8000/api/prompts/environment-setup';
+        } else if (processId === 'test-execution') {
+          endpoint = 'http://localhost:8000/api/prompts/test-execution';
         }
         const response = await fetch(endpoint);
         if (!response.ok) {
@@ -313,7 +357,7 @@ Important:
           throw new Error(errorText || 'Base prompt fetch failed');
         }
         const data = await response.json();
-        setTempPrompt(data.prompt_text);
+        setTempPrompt(data.prompt_text || data.base_prompt);
       } catch (error) {
         alert('Base prompt alınamadı: ' + error.message);
       }
@@ -355,6 +399,8 @@ Important:
     'test-case-optimization': TestCaseOptimization,
     'test-code-generation': TestCodeGeneration,
     'test-execution': TestExecutionForm,
+    'test-reporting': TestReportingForm,
+    'test-closure': TestClosureForm,
     'test-planning': TestPlanningForm,
     'environment-setup': EnvironmentSetupForm,
   };
@@ -527,7 +573,13 @@ Important:
                   onSetOutput={onSetOutput} // Pass the new onSetOutput handler
                   sessionId={sessionId} // Pass global sessionId to forms
                   onFormStateChange={processId === 'test-scenario-generation' ? setTestScenarioFormState : undefined}
-                  onTestCaseGeneration={processId === 'test-case-generation' ? setTestCaseFormState : undefined}
+                  onTestCaseGeneration={
+                    processId === 'test-case-generation' ? setTestCaseFormState : 
+                    processId === 'test-execution' ? setTestExecutionFormState : 
+                    processId === 'test-reporting' ? setTestReportingFormState :
+                    processId === 'test-closure' ? setTestClosureFormState :
+                    undefined
+                  }
                   onTestCaseOptimization={processId === 'test-case-optimization' ? handleTestCaseOptimizationStateChange : undefined}
                   onPromptChange={processId === 'test-case-optimization' ? handleTestCaseOptimizationPromptChange : undefined}
                   currentPrompt={processId === 'test-case-optimization' ? (testCaseOptimizationFormState.prompt || '') : 
@@ -882,6 +934,22 @@ Important:
                       return;
                     }
                     
+                    // Special handling for Test Execution
+                    if (activeTab === 'test-execution') {
+                      if (testExecutionFormState.handleRun && typeof testExecutionFormState.handleRun === 'function') {
+                        testExecutionFormState.handleRun();
+                      }
+                      return;
+                    }
+                    
+                    // Special handling for Test Reporting
+                    if (activeTab === 'test-reporting') {
+                      if (testReportingFormState.handleRun && typeof testReportingFormState.handleRun === 'function') {
+                        testReportingFormState.handleRun();
+                      }
+                      return;
+                    }
+                    
                     // Special handling for Test Code Generation
                     if (activeTab === 'test-code-generation') {
                       onRun(activeTab);
@@ -912,7 +980,9 @@ Important:
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
-                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
+                  (activeTab === 'test-execution' && (!testExecutionFormState.canRun || testExecutionFormState.isRunning)) ||
+                  (activeTab === 'test-reporting' && (!testReportingFormState.canRun || testReportingFormState.isRunning)) ||
+                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-execution' && activeTab !== 'test-reporting' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
                 }
                 className={clsx(
                   "w-full py-3 px-4 rounded-md text-white font-medium transition-colors shadow-sm flex items-center justify-center",
@@ -920,7 +990,8 @@ Important:
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
-                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
+                  (activeTab === 'test-execution' && (!testExecutionFormState.canRun || testExecutionFormState.isRunning)) ||
+                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-execution' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
                     ? "bg-gray-300 cursor-not-allowed" 
                     : "bg-indigo-600 hover:bg-indigo-700"
                 )}
@@ -972,6 +1043,30 @@ Important:
                     </>
                   ) : (
                     'Run Process'
+                  )
+                ) : activeTab === 'test-execution' ? (
+                  testExecutionFormState.isRunning ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 0 1 4 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Executing Tests...
+                    </>
+                  ) : (
+                    'Run Process'
+                  )
+                ) : activeTab === 'test-reporting' ? (
+                  testReportingFormState.isRunning ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 0 1 4 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Generating Report...
+                    </>
+                  ) : (
+                    'Generate Report'
                   )
                 ) : (
                   pipelineStatus[activeTab] === 'running' ? (

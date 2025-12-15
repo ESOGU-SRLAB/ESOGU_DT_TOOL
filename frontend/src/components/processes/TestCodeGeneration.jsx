@@ -194,19 +194,18 @@ const TestCodeGeneration = ({
     console.log('🔍 Debug - Full API keys structure:', JSON.stringify(apiKeys, null, 2));
     
     let requiredApiKey = null;
-    if (model.includes('gemini')) {
+    // Check if model requires API key (Gemini models only, not local LM Studio models)
+    if (model.startsWith('gemini')) {
       requiredApiKey = apiKeys.google;  // Gemini uses google key
       console.log('🔍 Debug - Selected Google/Gemini key:', requiredApiKey ? `${requiredApiKey.substring(0, 10)}...` : 'NOT FOUND');
-    } else if (model.includes('gpt') || model.includes('openai')) {
-      requiredApiKey = apiKeys.openai;
-      console.log('🔍 Debug - Selected OpenAI key:', requiredApiKey ? `${requiredApiKey.substring(0, 10)}...` : 'NOT FOUND');
+      
+      if (!requiredApiKey) {
+        console.log('❌ Debug - API key validation failed for Gemini');
+        toast.error('Please configure Gemini API key in settings');
+        return null;
+      }
     }
-    
-    if (!requiredApiKey && (model.includes('gemini') || model.includes('gpt') || model.includes('openai'))) {
-      console.log('❌ Debug - API key validation failed');
-      toast.error(`Please configure ${model.includes('gemini') ? 'Gemini' : 'OpenAI'} API key in settings`);
-      return null;
-    }
+    // Note: Local LM Studio models (including openai/gpt-oss-*) don't require API keys
     
     console.log('✅ Debug - API key validation passed');
     console.log('🔍 Debug - Session ID:', sessionId);
@@ -221,8 +220,7 @@ const TestCodeGeneration = ({
       environment_name: environmentName,
       sessionId: sessionId, // Add session ID from props
       prompt: effectivePrompt,
-      output_format: outputFormat,
-      sessionId: sessionId
+      output_format: outputFormat
     };
   };
 

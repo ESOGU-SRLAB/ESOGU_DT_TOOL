@@ -414,11 +414,18 @@ IMPORTANT:
       });
       
       console.log(`Running ${optimizationType} optimization on ${selectedTestCaseData.length} test cases out of ${testCases.length} total test cases`);
+      console.log(`Current optimizationType state:`, optimizationType);
       console.log(`Selected test case keys:`, Array.from(selectedTestCases));
       console.log(`Available test case keys:`, testCases.map((tc, index) => getUniqueKey(tc, index)));
       
       // Global API key'i al
       const modelApiKey = getModelApiKey(selectedModel);
+      
+      // DEBUG: Log just before sending request
+      console.log('🚀 SENDING REQUEST TO BACKEND:');
+      console.log('  - optimization_type:', optimizationType);
+      console.log('  - selected_model:', selectedModel);
+      console.log('  - test_cases count:', selectedTestCaseData.length);
       
       const requestData = {
         selected_test_cases: selectedTestCaseData,
@@ -428,6 +435,8 @@ IMPORTANT:
         optimization_type: optimizationType,
         api_key: modelApiKey || undefined // Global API key
       };
+      
+      console.log('📦 Full request data:', requestData);
 
       const response = await axios.post('http://localhost:8000/api/test-case-optimization/smart-selection', requestData);
 
@@ -612,12 +621,63 @@ IMPORTANT:
                 disabled={loading}
               />
               <label htmlFor="individual-optimization" className="ml-3 block text-sm text-gray-700">
-                <span className="font-medium">Individual Comparison</span>
+                <span className="font-medium">Serial Smart Selection</span>
                 <span className="block text-gray-500 text-xs mt-1">
-                  Compare each test case pair individually (1-1 comparisons). More accurate but slower for large datasets. Uses multiple LLM calls.
+                  Compare each test case pair individually (1-1 comparisons). Most accurate for all datasets. Uses multiple LLM calls sequentially.
                 </span>
               </label>
             </div>
+            
+            {/* Parallel Smart Selection - Only for Gemini models */}
+            {(() => {
+              const model = availableModels.find(m => m.key === selectedModel);
+              const isGeminiModel = model && model.key.toLowerCase().includes('gemini');
+              
+              return (
+                <div className={`flex items-center ${!isGeminiModel ? 'opacity-50' : ''}`}>
+                  <input
+                    id="parallel-optimization"
+                    name="optimization-type"
+                    type="radio"
+                    value="parallel"
+                    checked={optimizationType === 'parallel'}
+                    onChange={(e) => {
+                      console.log('Parallel radio clicked, value:', e.target.value);
+                      setOptimizationType(e.target.value);
+                    }}
+                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300"
+                    disabled={loading || !isGeminiModel}
+                  />
+                  <label htmlFor="parallel-optimization" className="ml-3 block text-sm text-gray-700">
+                    <span className="font-medium">
+                      Parallel Smart Selection
+                      {isGeminiModel && (
+                        <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">
+                          Recommended
+                        </span>
+                      )}
+                      {!isGeminiModel && (
+                        <span className="ml-2 px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">
+                          Gemini Only
+                        </span>
+                      )}
+                    </span>
+                    <span className="block text-gray-500 text-xs mt-1">
+                      {isGeminiModel ? (
+                        <>
+                          Groups test cases and optimizes in parallel, then performs final optimization. 
+                          <strong className="text-green-600"> ~80-85% faster</strong> than serial with <strong>same accuracy</strong>. 
+                          Requires 20+ test cases. Only available with Gemini models.
+                        </>
+                      ) : (
+                        'Only available when a Gemini model is selected. Provides 80-85% speed improvement with same accuracy.'
+                      )}
+                    </span>
+                  </label>
+                </div>
+              );
+            })()}
+            
             <div className="flex items-center">
               <input
                 id="bulk-optimization"
@@ -646,8 +706,41 @@ IMPORTANT:
               </div>
               <div className="ml-3">
                 <p className="text-sm text-blue-700">
-                  <strong>Recommendation:</strong> Use <strong>Bulk Optimization</strong> for faster processing when you have many test cases. 
-                  Use <strong>Individual Comparison</strong> for maximum accuracy with smaller datasets.
+                  {(() => {
+                    const model = availableModels.find(m => m.key === selectedModel);
+                    const isGeminiModel = model && model.key.toLowerCase().includes('gemini');
+                    const selectedCount = selectedTestCases.size;
+                    
+                    if (isGeminiModel && selectedCount >= 20) {
+                      return (
+                        <>
+                          <strong>Recommendation:</strong> Use <strong className="text-green-600">Parallel Smart Selection</strong> for maximum speed (~80-85% faster) 
+                          with guaranteed same accuracy as Serial. You have {selectedCount} test cases selected.
+                        </>
+                      );
+                    } else if (isGeminiModel && selectedCount > 0 && selectedCount < 20) {
+                      return (
+                        <>
+                          <strong>Note:</strong> Parallel optimization requires at least 20 test cases. 
+                          You have {selectedCount} selected. Use <strong>Serial Smart Selection</strong> for best accuracy.
+                        </>
+                      );
+                    } else if (!isGeminiModel && selectedModel) {
+                      return (
+                        <>
+                          <strong>Note:</strong> Parallel optimization is only available with Gemini models. 
+                          Select a Gemini model to enable parallel processing.
+                        </>
+                      );
+                    } else {
+                      return (
+                        <>
+                          <strong>Recommendation:</strong> Use <strong>Bulk Optimization</strong> for faster processing when you have many test cases. 
+                          Use <strong>Serial Smart Selection</strong> for maximum accuracy with smaller datasets.
+                        </>
+                      );
+                    }
+                  })()}
                 </p>
               </div>
             </div>

@@ -127,7 +127,6 @@ uploads/
 # Test directories and files
 tests/
 /tests/
-test_*.py
 *_test.py
 test_results/
 coverage/

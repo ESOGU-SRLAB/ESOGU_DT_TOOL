@@ -169,6 +169,7 @@ async def get_test_cases_by_process_title(process_title: str):
 async def run_smart_selection(request: Request):
     """
     Seçilen test case'ler üzerinde smart selection işlemini çalıştır.
+    Optimization type'a göre serial, parallel veya bulk çalıştırır.
     """
     try:
         data = await request.json()
@@ -179,8 +180,14 @@ async def run_smart_selection(request: Request):
         custom_prompt = data.get("custom_prompt", "")  # Get custom prompt from request
         selected_model = data.get("selected_model", "")  # Get selected model - don't use default
         api_key = data.get("api_key", "")  # Get API key for external models
-        optimization_type = data.get("optimization_type", "individual")  # New field for optimization type
+        optimization_type = data.get("optimization_type", "individual")  # individual, bulk, or parallel
         session_id = data.get("session_id") or str(uuid.uuid4())  # Generate session_id if not provided
+        
+        # DEBUG: Log received data
+        logger.info(f"🔍 SMART SELECTION REQUEST:")
+        logger.info(f"   Received test cases: {len(selected_test_cases)}")
+        logger.info(f"   Optimization type: {optimization_type}")
+        logger.info(f"   Process titles: {process_titles}")
         
         if not selected_test_cases:
             raise HTTPException(status_code=400, detail="No test cases selected")
@@ -201,6 +208,10 @@ async def run_smart_selection(request: Request):
         is_gemini_model = any(gemini in selected_model.lower() for gemini in ["gemini"])
         if is_gemini_model and not api_key:
             raise HTTPException(status_code=400, detail="API key is required for Gemini models")
+        
+        # Parallel optimization için Gemini model kontrolü
+        if optimization_type == "parallel" and not is_gemini_model:
+            raise HTTPException(status_code=400, detail="Parallel optimization only works with Gemini models")
             
         # Process name zorunlu
         if not process_name or process_name.strip() == "":
@@ -212,10 +223,23 @@ async def run_smart_selection(request: Request):
         process_id = str(uuid.uuid4())
         
         # Choose optimization method based on type
-        if optimization_type == "bulk":
-            result = await service.run_bulk_smart_selection(selected_test_cases, custom_prompt, selected_model, api_key, process_id)
-        else:
-            result = await service.run_smart_selection(selected_test_cases, custom_prompt, selected_model, api_key, process_id)
+        logger.info(f"🎯 ROUTER: Optimization type selected = '{optimization_type}'")
+        
+        if optimization_type == "parallel":
+            logger.info("🎯 ROUTER: Calling run_parallel_smart_selection")
+            result = await service.run_parallel_smart_selection(
+                selected_test_cases, custom_prompt, selected_model, api_key, process_id
+            )
+        elif optimization_type == "bulk":
+            logger.info("🎯 ROUTER: Calling run_bulk_smart_selection")
+            result = await service.run_bulk_smart_selection(
+                selected_test_cases, custom_prompt, selected_model, api_key, process_id
+            )
+        else:  # individual (default, serial)
+            logger.info(f"🎯 ROUTER: Calling run_smart_selection (serial) - optimization_type was '{optimization_type}'")
+            result = await service.run_smart_selection(
+                selected_test_cases, custom_prompt, selected_model, api_key, process_id
+            )
         
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["message"])
@@ -242,44 +266,7 @@ async def run_smart_selection(request: Request):
                 "process_name": process_name,  # Save process name for test_case_optimization
                 "process_titles": target_processes,  # Save multiple process titles
                 "process_count": len(target_processes),
-                "optimization_type": optimization_type  # Save optimization type
-            }
-            
-            save_session_result = save_session_data(session_data, "test_case_optimization")
-            if save_session_result:
-                logger.info(f"Session data saved successfully for session_id: {session_id}")
-            else:
-                logger.warning(f"Failed to save session data for session_id: {session_id}")
-                
-        except Exception as session_error:
-            logger.error(f"Error saving session data: {session_error}")
-            # Don't fail the main request if session saving fails
-        
-        # Add session_id to response
-        result["session_id"] = session_id
-        
-        return JSONResponse(
-            status_code=200,
-            content=result
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in run_smart_selection: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-        # Session history'ye kaydet
-        try:
-            session_data = {
-                "session_id": session_id,
-                "output": result["data"],
-                "edited_prompt": bool(custom_prompt),  # True if custom prompt was used
-                "used_prompt": custom_prompt or "Default optimization prompt",
-                "used_model": selected_model,  # Use the actual selected model
-                "process_name": process_name,  # Save process name for test_case_optimization
-                "process_titles": target_processes,  # Save multiple process titles
-                "process_count": len(target_processes),
-                "optimization_type": optimization_type  # Save optimization type
+                "optimization_type": optimization_type  # Save optimization type (individual/parallel/bulk)
             }
             
             save_session_result = save_session_data(session_data, "test_case_optimization")

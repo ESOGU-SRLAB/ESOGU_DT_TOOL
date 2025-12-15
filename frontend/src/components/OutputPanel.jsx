@@ -3,6 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import { useSelector } from 'react-redux';
 import { Gantt, ViewMode } from 'gantt-task-react';
 import "gantt-task-react/dist/index.css";
+import '../styles/markdown.css'; // Import markdown styling
+import TestReportViewer from './reports/TestReportViewer';
 
 // Helper function to safely render children in ReactMarkdown components
 const safeRenderChildren = (children) => {
@@ -208,7 +210,7 @@ function TestCaseOptimizationResults({ sessionId, liveResults }) {
         <div className="grid grid-cols-3 gap-4 text-sm text-blue-700">
           <div>
             <p className="font-medium">Original Test Cases</p>
-            <p className="text-lg">{(optimizationResults.unique_test_cases?.length || 0) + (optimizationResults.similar_test_cases?.length || 0)}</p>
+            <p className="text-lg">{optimizationResults.total_test_cases || ((optimizationResults.unique_test_cases?.length || 0) + (optimizationResults.similar_test_cases?.length || 0))}</p>
           </div>
           <div>
             <p className="font-medium">Unique Test Cases</p>
@@ -276,7 +278,7 @@ function TestCaseOptimizationResults({ sessionId, liveResults }) {
       )}{/* Comparison Logs Summary */}
       <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
         <h4 className="font-medium text-gray-800 mb-2">
-          📊 Comparison Logs ({optimizationResults.comparison_logs?.length || 0} comparisons)
+          📊 Comparison Logs ({optimizationResults.total_comparisons || optimizationResults.comparison_logs?.length || 0} comparisons)
         </h4>
         {optimizationResults.comparison_logs?.length > 0 ? (
           <details className="cursor-pointer">
@@ -438,22 +440,74 @@ function jsonToGanttTasks(jsonData) {
     }
     
     // Gantt Chart için task listesi oluştur
-    return data.map((task, index) => {
-      // Tarihleri parse et
-      const startDate = parseDate(task["Start Date"]);
-      const endDate = parseDate(task["End Date"]);
+    const tasks = [];
+    let lastEndDate = null;  // Track last task's end date for sequential planning
+    
+    for (let index = 0; index < data.length; index++) {
+      const task = data[index];
       
-      return {
-        id: `task-${index}`,
-        name: task["Task Name"],
-        start: startDate,
-        end: endDate,
-        progress: 0, // Varsayılan ilerleme
-        type: 'task',
-        isDisabled: false,
-        styles: { progressColor: '#0275d8', progressSelectedColor: '#0275d8' }
-      };
-    });
+      try {
+        // Tarihleri parse et
+        let startDate = parseDate(task["Start Date"]);
+        let endDate = parseDate(task["End Date"]);
+        
+        // Tarihlerin geçerli olduğunu kontrol et
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+          console.error(`Invalid date in task ${index}:`, {
+            taskName: task["Task Name"],
+            startDate: task["Start Date"],
+            endDate: task["End Date"]
+          });
+          continue; // Bu task'ı atla
+        }
+        
+        // End date start date'ten önce olamaz
+        if (endDate < startDate) {
+          console.warn(`End date before start date in task ${index}, swapping`);
+          [startDate, endDate] = [endDate, startDate];
+        }
+        
+        // Aynı gün başlayıp biten task'lar için minimum 1 gün ekle
+        if (startDate.getTime() === endDate.getTime()) {
+          console.warn(`Task ${index} starts and ends on same day, adding 1 day duration`);
+          endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + 1);
+        }
+        
+        // If this task starts same as previous task (LLM error), fix it sequentially
+        if (lastEndDate && startDate.getTime() === lastEndDate.getTime() - (24 * 60 * 60 * 1000)) {
+          console.warn(`Task ${index} overlaps with previous task, adjusting to sequential`);
+          startDate = new Date(lastEndDate);
+          // Keep the duration if specified
+          const duration = task["Duration (days)"] || 1;
+          endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + parseInt(duration) - 1);
+        }
+        
+        tasks.push({
+          id: `task-${index}`,
+          name: task["Task Name"] || `Task ${index + 1}`,
+          start: startDate,
+          end: endDate,
+          progress: 0, // Varsayılan ilerleme
+          type: 'task',
+          isDisabled: false,
+          styles: { progressColor: '#0275d8', progressSelectedColor: '#0275d8' }
+        });
+        
+        // Update lastEndDate for next iteration
+        lastEndDate = new Date(endDate);
+        lastEndDate.setDate(lastEndDate.getDate() + 1); // Add 1 day gap
+        
+      } catch (taskError) {
+        console.error(`Error processing task ${index}:`, taskError, task);
+        // Bu task'ı atla, diğerlerine devam et
+      }
+    }
+    
+    console.log(`Successfully converted ${tasks.length} tasks for Gantt chart`);
+    return tasks;
+    
   } catch (error) {
     console.error('JSON to Gantt conversion error:', error);
     return [];
@@ -462,23 +516,51 @@ function jsonToGanttTasks(jsonData) {
 
 // Tarih formatlarını işleme
 function parseDate(dateStr) {
-  if (!dateStr) return new Date();
-  
-  // YYYY-MM-DD formatını kontrol et
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return new Date(dateStr);
+  if (!dateStr) {
+    console.warn('Empty date string, using current date');
+    return new Date();
   }
   
-  // Bugün+N formatını işle (ör: "today+5")
-  if (dateStr.toLowerCase().includes('today+')) {
-    const daysToAdd = parseInt(dateStr.split('+')[1], 10) || 0;
+  // String'e çevir (number veya object olabilir)
+  const dateString = String(dateStr).trim();
+  
+  // YYYY-MM-DD formatını kontrol et
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    const date = new Date(dateString + 'T00:00:00');
+    if (isNaN(date.getTime())) {
+      console.error('Invalid date format:', dateString);
+      return new Date();
+    }
+    return date;
+  }
+  
+  // {today}+N veya today+N formatını işle
+  const todayPlusMatch = dateString.match(/\{?today\}?\s*\+\s*(\d+)/i);
+  if (todayPlusMatch) {
+    const daysToAdd = parseInt(todayPlusMatch[1], 10) || 0;
     const result = new Date();
     result.setDate(result.getDate() + daysToAdd);
+    console.log(`Parsed ${dateString} as ${result.toISOString().split('T')[0]}`);
     return result;
   }
   
-  // Diğer durumlar için geçerli bir tarih döndür
-  return new Date(dateStr);
+  // ISO string formatı
+  if (dateString.includes('T') || dateString.includes('Z')) {
+    const date = new Date(dateString);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+  }
+  
+  // Son çare: Date constructor'a gönder
+  const fallbackDate = new Date(dateString);
+  if (!isNaN(fallbackDate.getTime())) {
+    return fallbackDate;
+  }
+  
+  // Hiçbir şey işe yaramazsa bugünün tarihini döndür
+  console.error('Could not parse date:', dateString, '- using current date');
+  return new Date();
 }
 
 // Görevlerin toplam süresine göre uygun görünümü ve sütun genişliğini seçen fonksiyon
@@ -510,7 +592,12 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
 
   const processId = activeTab !== 'pipeline' && activeTab !== 'files' ? activeTab : null;
   const selectedProcess = processes?.find(p => p.id === processId);
-  const processOutput = processId && output && output.processId === processId ? output : null;
+  
+  // Get output from outputs object (new way) or from output prop (legacy way)
+  const processOutput = processId && outputs && outputs[processId] 
+    ? outputs[processId] 
+    : (processId && output && output.processId === processId ? output : null);
+    
   const processName = selectedProcess?.name || '';
   const headerTitle = processId ? `${processName} Output` : 'Output';
   
@@ -544,6 +631,11 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
         content: "## Generated Test Scenarios\n\n### User Authentication\n1. **TC001**: Verify login with valid username and password\n2. **TC002**: Verify login with invalid credentials\n3. **TC003**: Verify password reset functionality\n\n### Shopping Cart\n1. **TC004**: Add single item to cart\n2. **TC005**: Add multiple items to cart",
         status: 'sample',
         timestamp: new Date().toISOString()
+      },
+      'test-execution': {
+        content: "# Test Execution Output\n\nRun this process to see actual output here.",
+        status: 'sample',
+        timestamp: new Date().toISOString()
       }
     };
     return samples[processId] || {
@@ -554,6 +646,16 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
   };
 
   const displayOutput = processOutput || (processId && !output ? getSampleOutput() : output);
+
+  // Debug logging
+  console.log('[OutputPanel] Render state:', {
+    activeTab,
+    processId,
+    hasOutputs: !!outputs,
+    outputsKeys: outputs ? Object.keys(outputs) : [],
+    processOutput,
+    displayOutput: displayOutput ? { status: displayOutput.status, hasContent: !!displayOutput.content } : null
+  });
 
   const renderCodeReviewOutput = () => {
     if (codeReviewStatus === 'loading') {
@@ -734,6 +836,230 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
       );
     }
   };
+  
+  const renderTestExecutionResults = (content) => {
+    // Parse batch test execution results
+    try {
+      // Check if this is a batch execution result
+      if (!content || !content.includes('BATCH TEST EXECUTION RESULTS')) {
+        return null; // Return null to use default rendering
+      }
+      
+      // Extract summary
+      const summaryMatch = content.match(/Total Tests: (\d+)\s+✅ Successful: (\d+)\s+❌ Failed: (\d+)\s+Success Rate: ([\d.]+)%/);
+      
+      if (!summaryMatch) {
+        return null; // Fallback to default rendering
+      }
+      
+      const [, total, successful, failed, successRate] = summaryMatch;
+      
+      // Extract individual test results using regex
+      const testResultPattern = /={80}\nTEST #(\d+): (.+?) (✅|❌)\nStatus: (PASSED|FAILED)\nTest ID: (.+?)\nSession: (.+?) \| Index: (\d+)\n={80}\n\n(?:OUTPUT:\n([\s\S]*?)\n\n|ERROR:\n([\s\S]*?)\n\n(?:OUTPUT:\n([\s\S]*?)\n\n)?)/g;
+      
+      const tests = [];
+      let match;
+      
+      while ((match = testResultPattern.exec(content)) !== null) {
+        const [, testNumber, testName, statusIcon, status, testId, sessionId, testIndex, output, error, errorOutput] = match;
+        
+        tests.push({
+          testNumber: parseInt(testNumber),
+          testName: testName.trim(),
+          status: status,
+          success: status === 'PASSED',
+          testId: testId.trim(),
+          sessionId: sessionId.trim(),
+          testIndex: parseInt(testIndex),
+          output: output ? output.trim() : (errorOutput ? errorOutput.trim() : ''),
+          error: error ? error.trim() : null
+        });
+      }
+      
+      return (
+        <div className="space-y-6">
+          {/* Context-Aware Execution Info */}
+          <div className="rounded-lg p-4 border bg-blue-50 border-blue-200">
+            <h4 className="font-semibold mb-2 text-blue-900">
+              🧠 Context-Aware Execution
+            </h4>
+            <div className="space-y-2 text-sm text-blue-800">
+              <div className="flex items-start gap-2">
+                <span className="text-green-600 font-bold">✓</span>
+                <span>Source code context automatically extracted from database</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-green-600 font-bold">✓</span>
+                <span>AI received both test code and source code being tested</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-green-600 font-bold">✓</span>
+                <span>Each test executed with full understanding of the context</span>
+              </div>
+            </div>
+            
+            {/* Source Code Display */}
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm font-medium text-blue-900 hover:text-blue-700 flex items-center gap-2">
+                <span>📄 View Source Code Context</span>
+                <span className="text-xs text-blue-600">(Click to expand)</span>
+              </summary>
+              <div className="mt-3 bg-white border border-blue-200 rounded p-3">
+                <p className="text-xs text-blue-700 mb-2">
+                  <strong>Note:</strong> The source code was extracted from the session when tests were generated.
+                  This context helps the AI understand what the tests are validating.
+                </p>
+                <div className="bg-gray-50 border border-gray-300 rounded p-3 max-h-96 overflow-y-auto">
+                  <pre className="text-xs font-mono text-gray-800 whitespace-pre-wrap">
+                    {/* Extract source code info from content if available */}
+                    {content.includes('Source Code Context:') 
+                      ? content.split('Source Code Context:')[1]?.split('================================================================================')[0]?.trim() || 'Source code context was provided to AI during execution'
+                      : 'Source code context was provided to AI during execution'}
+                  </pre>
+                </div>
+              </div>
+            </details>
+          </div>
+          
+          {/* Summary Section */}
+          <div className={`rounded-lg p-4 border ${
+            failed === '0' 
+              ? 'bg-green-50 border-green-200' 
+              : 'bg-yellow-50 border-yellow-200'
+          }`}>
+            <h4 className={`font-semibold mb-3 ${
+              failed === '0' ? 'text-green-900' : 'text-yellow-900'
+            }`}>
+              📊 Batch Execution Summary
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-gray-600 font-medium">Total Tests</p>
+                <p className="text-2xl font-bold text-gray-900">{total}</p>
+              </div>
+              <div>
+                <p className="text-gray-600 font-medium">Successful</p>
+                <p className="text-2xl font-bold text-green-600">✅ {successful}</p>
+              </div>
+              <div>
+                <p className="text-gray-600 font-medium">Failed</p>
+                <p className="text-2xl font-bold text-red-600">❌ {failed}</p>
+              </div>
+              <div>
+                <p className="text-gray-600 font-medium">Success Rate</p>
+                <p className="text-2xl font-bold text-indigo-600">{successRate}%</p>
+              </div>
+            </div>
+          </div>
+          
+          {/* Individual Test Results */}
+          <div className="space-y-4">
+            <h4 className="font-semibold text-gray-900 text-lg">Individual Test Results</h4>
+            
+            {tests.map((test) => (
+              <details 
+                key={test.testId} 
+                className={`bg-white rounded-lg border shadow-sm ${
+                  test.success 
+                    ? 'border-green-200 hover:border-green-300' 
+                    : 'border-red-200 hover:border-red-300'
+                }`}
+              >
+                <summary className="cursor-pointer p-4 hover:bg-gray-50 transition-colors">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg font-semibold text-gray-900">
+                          {test.success ? '✅' : '❌'} Test #{test.testNumber}: {test.testName}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <span className={`px-2 py-1 rounded-full font-medium ${
+                          test.success 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {test.status}
+                        </span>
+                        <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded font-mono">
+                          Index: {test.testIndex}
+                        </span>
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded font-mono text-xs">
+                          Session: {test.sessionId.substring(0, 8)}...
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </summary>
+                
+                <div className="px-4 pb-4 pt-2 border-t border-gray-100">
+                  {test.error && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm font-semibold text-red-700">❌ Error:</span>
+                      </div>
+                      <div className="bg-red-50 border border-red-200 rounded p-3">
+                        <pre className="text-xs font-mono text-red-800 whitespace-pre-wrap break-words">
+                          {test.error}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {test.output && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm font-semibold text-gray-700">📤 Output:</span>
+                      </div>
+                      <div className="bg-gray-50 border border-gray-200 rounded p-3">
+                        <pre className="text-xs font-mono text-gray-800 whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+                          {test.output}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {!test.output && !test.error && (
+                    <p className="text-sm text-gray-500 italic">No output available</p>
+                  )}
+                  
+                  {/* Test Metadata */}
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs font-medium text-gray-600 hover:text-gray-800">
+                      View Test Metadata
+                    </summary>
+                    <div className="mt-2 bg-gray-100 rounded p-2 text-xs font-mono">
+                      <div><strong>Test ID:</strong> {test.testId}</div>
+                      <div><strong>Session ID:</strong> {test.sessionId}</div>
+                      <div><strong>Test Index:</strong> {test.testIndex}</div>
+                      <div><strong>Test Number:</strong> {test.testNumber}</div>
+                    </div>
+                  </details>
+                </div>
+              </details>
+            ))}
+          </div>
+          
+          {/* Raw Output Toggle */}
+          <details className="mt-6">
+            <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+              View Raw Output
+            </summary>
+            <div className="mt-2 bg-gray-100 rounded p-4 overflow-hidden">
+              <pre className="text-xs font-mono whitespace-pre-wrap break-words max-w-full overflow-wrap-anywhere word-break-break-word">
+                {content}
+              </pre>
+            </div>
+          </details>
+        </div>
+      );
+      
+    } catch (error) {
+      console.error('Error parsing test execution results:', error);
+      return null; // Fallback to default rendering
+    }
+  };
+
   const renderTestCaseContent = (output) => {
     // Test case generation sonuçlarını handle et - Enhanced JSON parsing
     try {
@@ -1049,8 +1375,9 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   <div>
                     <p className="font-medium">Original Test Cases</p>
                     <p className="text-lg">
-                      {(results.unique_test_cases?.length || 0) + 
-                       (results.similar_test_cases?.length || 0)}
+                      {results.total_test_cases || 
+                       ((results.unique_test_cases?.length || 0) + 
+                       (results.similar_test_cases?.length || 0))}
                     </p>
                   </div>
                   <div>
@@ -1123,7 +1450,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               {/* Comparison Logs */}
               <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
                 <h4 className="font-medium text-gray-800 mb-2">
-                  📊 Comparison Logs ({results.comparison_logs?.length || 0} comparisons)
+                  📊 Comparison Logs ({results.total_comparisons || results.comparison_logs?.length || 0} comparisons)
                 </h4>
                 {results.comparison_logs?.length > 0 ? (
                   <details className="cursor-pointer">
@@ -1273,8 +1600,9 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   <div>
                     <p className="font-medium">Original Test Cases</p>
                     <p className="text-lg">
-                      {(testCaseOptimizationResults.unique_test_cases?.length || 0) + 
-                       (testCaseOptimizationResults.similar_test_cases?.length || 0)}
+                      {testCaseOptimizationResults.total_test_cases || 
+                       ((testCaseOptimizationResults.unique_test_cases?.length || 0) + 
+                       (testCaseOptimizationResults.similar_test_cases?.length || 0))}
                     </p>
                   </div>
                   <div>
@@ -1347,7 +1675,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               {/* Comparison Logs */}
               <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
                 <h4 className="font-medium text-gray-800 mb-2">
-                  📊 Comparison Logs ({testCaseOptimizationResults.comparison_logs?.length || 0} comparisons)
+                  📊 Comparison Logs ({testCaseOptimizationResults.total_comparisons || testCaseOptimizationResults.comparison_logs?.length || 0} comparisons)
                 </h4>
                 {testCaseOptimizationResults.comparison_logs?.length > 0 ? (
                   <details className="cursor-pointer">
@@ -1485,8 +1813,9 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                       <div>
                         <p className="font-medium">Original Test Cases</p>
                         <p className="text-lg">
-                          {(optimizationOutput.results.unique_test_cases?.length || 0) + 
-                           (optimizationOutput.results.similar_test_cases?.length || 0)}
+                          {optimizationOutput.results.total_test_cases || 
+                           ((optimizationOutput.results.unique_test_cases?.length || 0) + 
+                           (optimizationOutput.results.similar_test_cases?.length || 0))}
                         </p>
                       </div>
                       <div>
@@ -1555,7 +1884,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   )}{/* Comparison Logs Summary */}
                   <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
                     <h4 className="font-medium text-gray-800 mb-2">
-                      📊 Comparison Logs ({optimizationOutput.results.comparison_logs?.length || 0} comparisons)
+                      📊 Comparison Logs ({optimizationOutput.results.total_comparisons || optimizationOutput.results.comparison_logs?.length || 0} comparisons)
                     </h4>
                     {optimizationOutput.results.comparison_logs?.length > 0 ? (
                       <details className="cursor-pointer">
@@ -1886,6 +2215,56 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
       );
     }
 
+    // Check for test-reporting specific output
+    if (activeTab === 'test-reporting' && outputs && outputs[activeTab]) {
+      const testReportOutput = outputs[activeTab];
+      const isLoading = testReportOutput.status === 'loading' || testReportOutput.status === 'processing';
+      
+      return (
+        <div className="space-y-6">
+          <section>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-lg font-medium">Test Report</h3>
+              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                testReportOutput.status === 'completed' 
+                  ? 'bg-green-100 text-green-800' 
+                  : testReportOutput.status === 'error'
+                  ? 'bg-red-100 text-red-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}>
+                {testReportOutput.status === 'completed' ? 'Success' : 
+                 testReportOutput.status === 'error' ? 'Error' : 'Processing'}
+              </span>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+              <TestReportViewer 
+                output={testReportOutput.content} 
+                isLoading={isLoading}
+              />
+            </div>
+          </section>
+          
+          <section>
+            <h3 className="text-lg font-medium mb-3">Report Details</h3>
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 shadow-sm">
+              <div className="text-gray-600">
+                <p><strong>Status:</strong> {testReportOutput.status}</p>
+                <p><strong>Process:</strong> {testReportOutput.processType || 'Test Reporting'}</p>
+                {testReportOutput.model_used && <p><strong>Model:</strong> {testReportOutput.model_used}</p>}
+                {testReportOutput.metadata && testReportOutput.metadata.sessions_analyzed && (
+                  <p><strong>Sessions Analyzed:</strong> {testReportOutput.metadata.sessions_analyzed}</p>
+                )}
+                {testReportOutput.metadata && testReportOutput.metadata.processes_included && (
+                  <p><strong>Processes:</strong> {testReportOutput.metadata.processes_included.join(', ')}</p>
+                )}
+                <p><strong>Last Updated:</strong> {testReportOutput.timestamp ? new Date(testReportOutput.timestamp).toLocaleString() : new Date().toLocaleString()}</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     // Check for test-case-generation specific output
     console.log('[OutputPanel] Checking for test-case-generation output:', {
       activeTab,
@@ -1948,7 +2327,12 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
       }
     }
     
-    let currentOutput = { ...getSampleOutput() };
+    // Use displayOutput instead of creating a new currentOutput
+    let currentOutput = displayOutput || getSampleOutput() || {
+      content: "# Output\n\nRun a process to see output here.",
+      status: 'sample',
+      timestamp: new Date().toISOString()
+    };
 
     if (activeTab === 'code-review') {
       if (codeReviewStatus === 'loading') {
@@ -2070,37 +2454,84 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
         return <div className="text-red-600">Error: {testPlanningError}</div>;
       }
       if (plans && plans.length > 0) {
-        // Text olarak gelen JSON planını çıkar
+        // İlk plan'ı al
         let planContent = plans[0];
-        const jsonMatch = planContent.match(/```json\n([\s\S]*?)```/);
         let jsonContent = null;
         let filesSection = "";
         let ganttTasks = [];
         let ganttParseError = false;
         
-        // JSON kısmını ve files section kısmını ayır
-        if (jsonMatch) {
-          jsonContent = jsonMatch[1];
-          // Files kısmını ayıkla
-          const filesSectionMatch = planContent.match(/## Files Analyzed\n([\s\S]*?)\n\n## Test Plan/);
-          if (filesSectionMatch) {
-            filesSection = filesSectionMatch[1];
+        // JSON extraction - farklı formatları dene
+        // 1. Markdown code block içinde JSON
+        let jsonMatch = planContent.match(/```json\n([\s\S]*?)```/);
+        
+        // 2. Sadece JSON array
+        if (!jsonMatch) {
+          jsonMatch = planContent.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+          if (jsonMatch) {
+            jsonContent = jsonMatch[0];
           }
-          // Gantt Chart için task listesi oluştur
-          try {
-            ganttTasks = jsonToGanttTasks(jsonContent);
-          } catch (e) {
-            console.error('Error creating Gantt tasks:', e);
-            ganttParseError = true;
+        } else {
+          jsonContent = jsonMatch[1];
+        }
+        
+        // 3. Files section'ı bul
+        const filesSectionMatch = planContent.match(/\*\*Files Analyzed:\*\*\n([\s\S]*?)\n\*\*Test Plan:\*\*/);
+        if (filesSectionMatch) {
+          filesSection = filesSectionMatch[1];
+        } else {
+          // Alternatif format
+          const altFilesMatch = planContent.match(/Files analyzed:\n([\s\S]*?)(\n\n|\[)/);
+          if (altFilesMatch) {
+            filesSection = altFilesMatch[1];
           }
         }
-        // Eğer JSON ayrıştırılamadıysa veya Gantt parse hatası varsa, sadece model çıktısını göster
+        
+        // JSON varsa Gantt Chart oluştur
+        if (jsonContent) {
+          console.log('[Test Planning] Extracted JSON content:', jsonContent.substring(0, 500));
+          try {
+            ganttTasks = jsonToGanttTasks(jsonContent);
+            console.log('[Test Planning] Created Gantt tasks:', ganttTasks);
+          } catch (e) {
+            console.error('[Test Planning] Error creating Gantt tasks:', e);
+            ganttParseError = true;
+          }
+        } else {
+          console.warn('[Test Planning] No JSON content found in response');
+        }
+        
+        // Eğer JSON ayrıştırılamadıysa, model çıktısını temizle ve göster
         if (!jsonContent || ganttParseError) {
+          // Akademik metin veya beklenmedik formatta çıktı gelmiş olabilir
+          // Temizle ve kullanıcıya göster
+          let cleanedContent = planContent;
+          
+          // **Test Plan:** etiketini kaldır
+          cleanedContent = cleanedContent.replace(/\*\*Test Plan:\*\*\n/, '');
+          
+          // Beklenmeyen akademik başlıkları kaldır
+          cleanedContent = cleanedContent.replace(/^Title:.*$/gm, '');
+          cleanedContent = cleanedContent.replace(/^\*\*Title:.*$/gm, '');
+          
           return (
             <div className="mt-6">
-              <div className="bg-yellow-100 text-yellow-800 p-4 rounded">
-                <strong>Model çıktısı (JSON ayrıştırılamadı veya hatalı):</strong>
-                <pre className="mt-2 whitespace-pre-wrap break-words text-xs bg-gray-50 p-2 rounded">{planContent}</pre>
+              <div className="bg-yellow-100 text-yellow-800 p-4 rounded mb-4">
+                <strong>⚠️ Uyarı:</strong> Model beklenen JSON formatında yanıt üretmedi. Lütfen farklı bir model deneyin veya prompt'u gözden geçirin.
+              </div>
+              <div className="bg-gray-100 p-4 rounded">
+                <h3 className="font-semibold mb-2">Model Çıktısı:</h3>
+                <div className="prose prose-sm max-w-full">
+                  <ReactMarkdown 
+                    className="whitespace-pre-wrap break-words"
+                    components={{
+                      p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                      li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>
+                    }}
+                  >
+                    {cleanedContent}
+                  </ReactMarkdown>
+                </div>
               </div>
             </div>
           );
@@ -2138,12 +2569,33 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               <div className="mt-6">
                 <h2 className="text-lg font-medium mb-2">Test Plan Gantt Chart</h2>
                 <div className="border rounded-lg p-4 bg-white overflow-x-auto">
-                  <div style={{ width: '100%', minWidth: '800px', height: '400px' }}>
-                    {/* Dinamik görünüm ve sütun genişliği, hata olursa model çıktısı göster */}
-                    {(() => {
-                      try {
-                        const { viewMode, columnWidth } = getGanttViewModeAndColumnWidth(ganttTasks);
+                  {(() => {
+                    try {
+                      // Tüm tarihlerin geçerli olduğunu kontrol et
+                      const hasInvalidDates = ganttTasks.some(task => 
+                        isNaN(task.start.getTime()) || isNaN(task.end.getTime())
+                      );
+                      
+                      if (hasInvalidDates) {
+                        console.error('Some tasks have invalid dates');
                         return (
+                          <div className="bg-yellow-100 text-yellow-800 p-4 rounded">
+                            <strong>⚠️ Bazı görevlerde geçersiz tarihler var:</strong>
+                            <pre className="mt-2 whitespace-pre-wrap break-words text-xs bg-gray-50 p-2 rounded">
+                              {JSON.stringify(ganttTasks.map(t => ({
+                                name: t.name,
+                                start: t.start.toISOString ? t.start.toISOString().split('T')[0] : 'Invalid',
+                                end: t.end.toISOString ? t.end.toISOString().split('T')[0] : 'Invalid'
+                              })), null, 2)}
+                            </pre>
+                          </div>
+                        );
+                      }
+                      
+                      const { viewMode, columnWidth } = getGanttViewModeAndColumnWidth(ganttTasks);
+                      
+                      return (
+                        <div style={{ width: '100%', minWidth: '800px', height: '400px' }}>
                           <Gantt
                             tasks={ganttTasks}
                             viewMode={viewMode}
@@ -2153,26 +2605,34 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                             rowHeight={40}
                             ganttHeight={400}
                           />
-                        );
-                      } catch (err) {
-                        console.error('Gantt Chart render error:', err);
-                        return (
-                          <div className="bg-red-100 text-red-700 p-4 rounded">
-                            <strong>Gantt Chart oluşturulamadı. Model çıktısı:</strong>
+                        </div>
+                      );
+                    } catch (err) {
+                      console.error('Gantt Chart render error:', err);
+                      return (
+                        <div className="bg-red-100 text-red-700 p-4 rounded">
+                          <strong>❌ Gantt Chart render hatası:</strong>
+                          <p className="mt-2 text-sm">{err.message}</p>
+                          <details className="mt-2">
+                            <summary className="cursor-pointer text-sm font-medium">JSON Çıktısını Göster</summary>
                             <pre className="mt-2 whitespace-pre-wrap break-words text-xs bg-gray-50 p-2 rounded">{jsonContent}</pre>
-                          </div>
-                        );
-                      }
-                    })()}
-                  </div>
+                          </details>
+                        </div>
+                      );
+                    }
+                  })()}
                 </div>
               </div>
             ) : (
               jsonContent && (
                 <div className="mt-6">
                   <div className="bg-yellow-100 text-yellow-800 p-4 rounded">
-                    <strong>Gantt Chart oluşturulamadı veya görev bulunamadı. Model çıktısı:</strong>
-                    <pre className="mt-2 whitespace-pre-wrap break-words text-xs bg-gray-50 p-2 rounded">{jsonContent}</pre>
+                    <strong>⚠️ Gantt Chart için görev bulunamadı</strong>
+                    <p className="mt-2 text-sm">JSON parse edildi ancak geçerli görev oluşturulamadı.</p>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-sm font-medium">JSON Çıktısını Göster</summary>
+                      <pre className="mt-2 whitespace-pre-wrap break-words text-xs bg-gray-50 p-2 rounded">{jsonContent}</pre>
+                    </details>
                   </div>
                 </div>
               )
@@ -2302,6 +2762,52 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
         </div>
       );
     }
+    }
+    
+    // Check if this is a test execution result with batch format
+    if (activeTab === 'test-execution' && currentOutput.content) {
+      const executionResults = renderTestExecutionResults(currentOutput.content);
+      if (executionResults) {
+        return (
+          <div className="space-y-4">
+            <section>
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-lg font-medium">Test Execution Results</h3>
+                {currentOutput.status === 'sample' && (
+                  <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
+                    Sample
+                  </span>
+                )}
+                {currentOutput.status === 'completed' && (
+                  <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                    Completed
+                  </span>
+                )}
+                {currentOutput.status === 'error' && (
+                  <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
+                    Error
+                  </span>
+                )}
+              </div>
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+                {executionResults}
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-lg font-medium mb-3">Execution Details</h3>
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 shadow-sm">
+                <div className="text-gray-600 space-y-1">
+                  <p><strong>Status:</strong> {currentOutput.status === 'sample' ? 'Not Run' : currentOutput.status}</p>
+                  <p><strong>Process:</strong> Test Execution</p>
+                  {currentOutput.model_used && <p><strong>Model:</strong> {currentOutput.model_used}</p>}
+                  <p><strong>Last Updated:</strong> {new Date(currentOutput.timestamp).toLocaleString()}</p>
+                </div>
+              </div>
+            </section>
+          </div>
+        );
+      }
     }
 
     return (
