@@ -1,0 +1,58 @@
+[
+  {
+    "model": "CodeLlama 70B Instruct",
+    "model_key": "codellama:70b-instruct",
+    "status": "ERROR: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-case-optimization/smart-selection (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000025EE3DC91C0>: Failed to establish a new connection: [WinError 10061] Hedef makine etkin olarak reddettiğinden bağlantı kurulamadı'))",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 4.099529504776001
+  },
+  {
+    "model": "Kimi Dev 72B",
+    "model_key": "kimi-dev:72b",
+    "status": "ERROR: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-case-optimization/smart-selection (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000025EE3C58950>: Failed to establish a new connection: [WinError 10061] Hedef makine etkin olarak reddettiğinden bağlantı kurulamadı'))",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 4.056790590286255
+  },
+  {
+    "model": "GPT OSS 120B",
+    "model_key": "openai/gpt-oss-120b",
+    "status": "ERROR: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-case-optimization/smart-selection (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000025EE3DC9880>: Failed to establish a new connection: [WinError 10061] Hedef makine etkin olarak reddettiğinden bağlantı kurulamadı'))",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 4.100888252258301
+  },
+  {
+    "model": "DeepSeek R1 Distill 32B",
+    "model_key": "deepseek-r1-distill:32b",
+    "status": "ERROR: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-case-optimization/smart-selection (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000025EE3DC9F70>: Failed to establish a new connection: [WinError 10061] Hedef makine etkin olarak reddettiğinden bağlantı kurulamadı'))",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 4.11545205116272
+  },
+  {
+    "model": "Google Gemma 3 27B",
+    "model_key": "google/gemma-3-27b",
+    "status": "ERROR: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-case-optimization/smart-selection (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000025EE3DCA660>: Failed to establish a new connection: [WinError 10061] Hedef makine etkin olarak reddettiğinden bağlantı kurulamadı'))",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 4.064779996871948
+  },
+  {
+    "model": "Qwen 3 Coder 30B",
+    "model_key": "qwen/qwen3-coder-30b",
+    "status": "ERROR: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-case-optimization/smart-selection (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000025EE3DCAD50>: Failed to establish a new connection: [WinError 10061] Hedef makine etkin olarak reddettiğinden bağlantı kurulamadı'))",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 4.110940456390381
+  },
+  {
+    "model": "DeepSeek R1 Qwen3 8B",
+    "model_key": "deepseek/deepseek-r1-qwen3-8b",
+    "status": "ERROR: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-case-optimization/smart-selection (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000025EE3B0D670>: Failed to establish a new connection: [WinError 10061] Hedef makine etkin olarak reddettiğinden bağlantı kurulamadı'))",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 4.120206594467163
+  }
+]

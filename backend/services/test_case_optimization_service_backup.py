@@ -874,3 +874,83 @@ class TestCaseOptimizationService:
 
             # Check again before processing
             if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Bulk process {process_id} was stopped before processing")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+
+            # Bulk smart selection işlemini çalıştır
+            test_case_list = TestCaseList(test_cases=valid_data)
+            unique_test_cases = await bulk_smart_select(test_case_list, custom_prompt, selected_model, api_key)
+
+            # Check if process was stopped during execution
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Bulk process {process_id} was stopped during execution")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+
+            results = {
+                "unique_test_cases": [case.model_dump() for case in unique_test_cases.test_cases],
+                "similar_test_cases": unique_test_cases.duplicates,
+                "comparison_logs": unique_test_cases.comparison_logs,
+                "optimization_type": "bulk"
+            }
+
+            # Mark process as completed
+            running_processes[process_id]["status"] = "completed"
+            running_processes[process_id]["end_time"] = datetime.now()
+
+            return {
+                "success": True,
+                "message": "Bulk smart selection completed successfully",
+                "data": results,
+                "process_id": process_id
+            }
+
+        except ValueError as ve:
+            # Handle specific bulk optimization errors (JSON parsing, empty response, etc.)
+            running_processes.pop(process_id, None)
+            logger.error(f"Bulk optimization validation error: {ve}")
+            return {
+                "success": False,
+                "message": f"Bulk Optimization Error: {str(ve)}",
+                "data": {},
+                "process_id": process_id,
+                "error_type": "bulk_validation_error"
+            }
+        except RuntimeError as re:
+            # Handle bulk optimization runtime errors
+            running_processes.pop(process_id, None)
+            logger.error(f"Bulk optimization runtime error: {re}")
+            return {
+                "success": False,
+                "message": f"Bulk Optimization Runtime Error: {str(re)}",
+                "data": {},
+                "process_id": process_id,
+                "error_type": "bulk_runtime_error"
+            }
+        except Exception as e:
+            # Remove from tracking on error
+            running_processes.pop(process_id, None)
+            logger.error(f"Error running bulk smart selection: {e}")
+            return {
+                "success": False,
+                "message": f"Unexpected error in bulk optimization: {str(e)}",
+                "data": {},
+                "process_id": process_id,
+                "error_type": "unexpected_error"
+            }
+        finally:
+            # Clean up completed or errored processes after some time
+            if process_id in running_processes:
+                status = running_processes[process_id]["status"]
+                if status in ["completed", "stopped", "error"]:
+                    # Keep for a short time for status checking, then remove
+                    pass

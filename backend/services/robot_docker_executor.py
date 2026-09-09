@@ -131,7 +131,11 @@ class RobotDockerExecutor:
             # Container configuration
             container_config = {
                 "image": docker_image,
-                "command": f"bash -c 'source /opt/ros/humble/setup.bash && source /root/colcon_ws/install/setup.bash && python3 /test/test_runner.py'",
+                "command": (
+                    "bash -c 'source /opt/ros/humble/setup.bash && source "
+                    f"{os.getenv('LEGACY_ROS2_SETUP_SCRIPT', '/opt/stlc_ros/install/setup.bash')} "
+                    "&& python3 /test/test_runner.py'"
+                ),
                 "volumes": {
                     temp_dir: {'bind': '/test', 'mode': 'rw'}
                 },

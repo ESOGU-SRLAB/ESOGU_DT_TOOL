@@ -12,6 +12,8 @@ import logging
 import asyncio
 import time
 import io
+import os
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -31,14 +33,20 @@ logger = logging.getLogger(__name__)
 
 def _get_step_config(req: PipelineRunRequest, step_id: str) -> dict:
     """Return merged config: step-specific overrides on top of global defaults."""
+    from core.settings import get_settings
+
     cfg = req.step_configs.get(step_id)
     base = {
-        "model": req.global_model or "qwen2.5-7b-instruct-1m",
+        "model": req.global_model or get_settings().model_identifier,
         "api_key": req.global_api_key,
         "process_title": req.process_title,
     }
     if cfg:
-        override = cfg.dict(exclude_none=True)
+        override = (
+            cfg.model_dump(exclude_none=True)
+            if hasattr(cfg, "model_dump")
+            else cfg.dict(exclude_none=True)
+        )
         base.update(override)
     return base
 
@@ -60,7 +68,10 @@ class _SyncFile:
     content directly in the prompt string instead).
     """
     def __init__(self, name: str, content: str):
-        self.filename = name
+        self.filename = os.path.basename(name)
+        # Existing FileHandler stores uploads by name. Give headless/background
+        # jobs a collision-free storage name while preserving the logical name.
+        self.storage_name = f"{uuid.uuid4().hex}_{self.filename}"
         self._bytes = content.encode("utf-8") if isinstance(content, str) else content
 
     async def read(self) -> bytes:
@@ -237,7 +248,13 @@ async def run_environment_setup(
         cfg = _get_step_config(req, step_id)
         files = _files_for_step(req, step_id)
         upload_files = await _make_upload_files(files)
-        types = [f.type for f in files if f.type] or ["source"]
+        types = []
+        for file_info in files:
+            supplied_type = (file_info.type or "source").strip()
+            normalized = supplied_type.lower().replace("_", " ").replace("-", " ")
+            if normalized in {"requirement", "requirements", "requirement document"}:
+                supplied_type = "Requirement Document"
+            types.append(supplied_type)
 
         environment_name = cfg.get("environment_name") or cfg.get("process_title") or "Pipeline Environment"
 
@@ -350,229 +367,76 @@ async def run_test_case_generation(
     req: PipelineRunRequest,
     previous_results: Dict[str, StepResult],
 ) -> StepResult:
+    """Adapt pipeline state to the existing UI-backed generation service."""
     step_id = "test-case-generation"
     t0 = time.time()
     try:
         from core.database import get_database
-        from utils.model_client import LLMClient
+        from services.test_case_generation_service import TestCaseGenerationService
 
         cfg = _get_step_config(req, step_id)
-        model = cfg.get("model", "qwen2.5-7b-instruct-1m")
-        api_key = cfg.get("api_key")
-        process_title = cfg.get("process_title") or req.process_title or "Pipeline Process"
-
-        # --- Get test scenarios from the previous step or from DB ---
         scenarios: List[dict] = []
-        prev_tsg = previous_results.get("test-scenario-generation")
-        if prev_tsg and prev_tsg.status == PipelineStepStatus.COMPLETED and prev_tsg.output:
-            ts_data = prev_tsg.output.get("test_scenarios", {})
-            scenarios = ts_data.get("TestScenarios", [])
-        
+        previous = previous_results.get("test-scenario-generation")
+        if previous and previous.status == PipelineStepStatus.COMPLETED and previous.output:
+            scenario_data = previous.output.get("test_scenarios", {})
+            scenarios = scenario_data.get("TestScenarios", [])
+
         if not scenarios:
-            # Fallback: query DB for this session's test scenarios
             db = await get_database()
-            doc = await db["session_history"].find_one({"session_id": req.session_id})
-            if doc:
-                tsg_out = doc.get("processes", {}).get("test_scenario_generation", {}).get("output", {})
-                ts_data = tsg_out.get("test_scenarios", {})
-                scenarios = ts_data.get("TestScenarios", [])
+            document = await db["session_history"].find_one({"session_id": req.session_id})
+            if document:
+                output = (
+                    document.get("processes", {})
+                    .get("test_scenario_generation", {})
+                    .get("output", {})
+                )
+                scenarios = output.get("test_scenarios", {}).get("TestScenarios", [])
 
         if not scenarios:
             return _err(step_id, "No test scenarios available from previous step", t0)
 
-        # --- Build file contents for test case generation ---
-        files = _files_for_step(req, step_id) or _files_for_step(req, "test-scenario-generation")
-        selected_files = [{"name": fi.name, "content": fi.content} for fi in files]
-
-        # --- Get process prompt from DB ---
-        db = await get_database()
-        tsg_doc = await db["test_scenario_generation_prompt"].find_one({"test_name": cfg.get("test_type") or "Functional"})
-        process_prompt = ""
-        if tsg_doc:
-            process_prompt = tsg_doc.get("test_case_main_prompt", "") or tsg_doc.get("test_prompt", "")
-
-        if not process_prompt:
-            process_prompt = (
-                "Generate comprehensive test cases for each test scenario. "
-                "Follow ISTQB standards and cover positive, negative and boundary cases."
-            )
-
-        # --- Convert scenarios to the format expected by the existing endpoint logic ---
-        # We call the generate-test-cases logic inline to avoid an HTTP round-trip
-        import json as _json
-        import re
-
-        model_client_temp = LLMClient(api_key=api_key)
-        actual_model = model_client_temp.get_model_identifier(model)
-        llm_client = LLMClient(model_name=actual_model, api_key=api_key, use_case="test_case_generation")
-
-        test_case_results = []
-        for i, scenario in enumerate(scenarios):
-            scenario_id = scenario.get("ScenarioID", f"TS-{i+1:03d}")
-            scenario_title = scenario.get("Title", "Unknown")
-            scenario_description = scenario.get("Description", "")
-            scenario_objective = scenario.get("Objective", "")
-            scenario_category = scenario.get("Category", "")
-
-            file_contents_str = ""
-            for sf in selected_files:
-                file_contents_str += f"\n\n=== FILE: {sf['name']} ===\n{sf['content']}\n"
-
-            json_structure = json_layout = """{
-  "TestCases": [
-    {
-      "ScenarioID": "<Scenario ID>",
-      "TestCaseID": "<TC ID>",
-      "Title": "<Title>",
-      "Description": "<Description>",
-      "Objective": "<Objective>",
-      "Category": "<Category>",
-      "Comments": "<Comments>"
-    }
-  ],
-  "Summary": {"TotalTestCases": 1, "Coverage": "<Coverage description>"}
-}"""
-
-            prompt = f"""IMPORTANT: Respond ONLY with valid JSON. No other text.
-
-{process_prompt}
-
-## TEST SCENARIO:
-Scenario ID: {scenario_id}
-Title: {scenario_title}
-Description: {scenario_description}
-Objective: {scenario_objective}
-Category: {scenario_category}
-
-## APPLICATION FILES:
-{file_contents_str}
-
-## OUTPUT FORMAT:
-{json_structure}
-
-Generate 5-8 test cases for this scenario. Start immediately with the JSON object:"""
-
-            try:
-                # skip_chunking=True: bağlam bütünlüğü kritik, tüm prompt tek seferde gönderilir
-                try:
-                    response = await llm_client.generate_response(
-                        prompt, temperature=0.2, max_tokens=4000,
-                        response_format={"type": "json_object"},
-                        skip_chunking=True
-                    )
-                except Exception:
-                    response = await llm_client.generate_response(
-                        prompt, temperature=0.2, max_tokens=4000,
-                        skip_chunking=True
-                    )
-
-                if not response:
-                    raise ValueError("Empty response from LLM")
-
-                # Parse JSON robustly
-                cleaned = response.strip()
-                if "```json" in cleaned:
-                    m = re.search(r"```json\s*(.*?)\s*```", cleaned, re.DOTALL)
-                    if m:
-                        cleaned = m.group(1).strip()
-                elif "```" in cleaned:
-                    cleaned = re.sub(r"```.*?```", "", cleaned, flags=re.DOTALL).strip()
-
-                # Extract JSON object
-                lines, started, brace_count = [], False, 0
-                for line in cleaned.split("\n"):
-                    s = line.strip()
-                    if s.startswith("{") or started:
-                        started = True
-                        lines.append(line)
-                        brace_count += s.count("{") - s.count("}")
-                        if brace_count == 0 and started and s.endswith("}"):
-                            break
-                if lines:
-                    cleaned = "\n".join(lines)
-
-                parsed = _json.loads(cleaned)
-                test_cases = parsed.get("TestCases", [])
-
-                # Ensure required fields
-                enhanced = []
-                for idx, tc in enumerate(test_cases):
-                    enhanced.append({
-                        "ScenarioID": tc.get("ScenarioID", scenario_id),
-                        "TestCaseID": tc.get("TestCaseID", f"{scenario_id}_TC_{idx+1:03d}"),
-                        "Title": tc.get("Title", f"Test case {idx+1} for {scenario_title}"),
-                        "Description": tc.get("Description", ""),
-                        "Objective": tc.get("Objective", ""),
-                        "Category": tc.get("Category", "Positive"),
-                        "Comments": tc.get("Comments", ""),
-                    })
-
-                test_case_results.append({
-                    "scenario_id": scenario_id,
-                    "scenario_title": scenario_title,
-                    "status": "success",
-                    "test_cases": enhanced,
-                    "test_cases_count": len(enhanced),
-                    "model_used": model,
-                    "summary": parsed.get("Summary", {}),
-                })
-
-            except Exception as e:
-                logger.warning(f"[Pipeline][test-case-generation] Scenario {scenario_id} failed: {e}")
-                test_case_results.append({
-                    "scenario_id": scenario_id,
-                    "scenario_title": scenario_title,
-                    "status": "error",
-                    "error": str(e),
-                    "test_cases": [],
-                    "test_cases_count": 0,
-                    "model_used": model,
-                })
-
-        # Persist to DB
-        total_tc = sum(r.get("test_cases_count", 0) for r in test_case_results)
-        successful = sum(1 for r in test_case_results if r.get("status") == "success")
-
-        db = await get_database()
-        await db["session_history"].update_one(
-            {"session_id": req.session_id},
+        # The UI historically converted stored PascalCase scenario fields into
+        # lower-case form fields. Make that implicit frontend transform explicit.
+        normalized_scenarios = [
             {
-                "$set": {
-                    "processes.test_case_generation.output": {
-                        "test_case_results": test_case_results,
-                        "metadata": {
-                            "generated_at": datetime.utcnow().isoformat(),
-                            "scenarios_processed": len(scenarios),
-                            "total_test_cases": total_tc,
-                            "model_used": model,
-                            "session_id": req.session_id,
-                            "selected_process_title": process_title,
-                        },
-                    },
-                    "processes.test_case_generation.selected_process_title": process_title,
-                    "updated_at": datetime.utcnow(),
-                }
-            },
-            upsert=True,
+                "scenario_id": item.get("scenario_id") or item.get("ScenarioID"),
+                "scenario": item.get("scenario") or item.get("Title"),
+                "description": item.get("description") or item.get("Description", ""),
+                "objective": item.get("objective") or item.get("Objective", ""),
+                "category": item.get("category") or item.get("Category", ""),
+            }
+            for item in scenarios
+        ]
+        files = _files_for_step(req, step_id) or _files_for_step(
+            req, "test-scenario-generation"
         )
-
-        output = {
-            "status": "success",
-            "test_case_results": test_case_results,
-            "summary": {
-                "scenarios_processed": len(scenarios),
-                "successful_scenarios": successful,
-                "failed_scenarios": len(scenarios) - successful,
-                "total_test_cases": total_tc,
-                "model_used": model,
-                "session_id": req.session_id,
-            },
+        payload = {
+            "selected_scenarios": normalized_scenarios,
+            "process_prompt": cfg.get("custom_prompt") or "",
+            "selected_files": [
+                {"name": file_info.name, "content": file_info.content}
+                for file_info in files
+            ],
+            "ai_model": cfg.get("model"),
+            "session_id": req.session_id,
+            "selected_process_title": (
+                cfg.get("process_title") or req.process_title or "Pipeline Process"
+            ),
+            "api_key": cfg.get("api_key"),
+            "test_type": cfg.get("test_type") or "Functional",
         }
-        return _ok(step_id, output, t0)
-    except Exception as e:
-        logger.error(f"[Pipeline][{step_id}] Error: {e}", exc_info=True)
-        return _err(step_id, str(e), t0)
-
+        result = await TestCaseGenerationService().generate(payload)
+        total_cases = result.get("summary", {}).get("total_test_cases", 0)
+        if result.get("status") != "success" or total_cases <= 0:
+            return _err(
+                step_id,
+                result.get("message") or "Test case generation produced no test cases",
+                t0,
+            )
+        return _ok(step_id, result, t0)
+    except Exception as exc:
+        logger.error(f"[Pipeline][{step_id}] Error: {exc}", exc_info=True)
+        return _err(step_id, str(exc), t0)
 
 # ---------------------------------------------------------------------------
 # Step 7: Test Case Optimization
@@ -688,7 +552,7 @@ async def run_test_code_generation(
         max_test_cases = cfg.get("max_test_cases")
 
         # --- Determine environment session_id ---
-        environment_session_id = req.session_id  # Default: same session
+        environment_session_id = cfg.get("environment_session_id") or req.session_id
         prev_env = previous_results.get("environment-setup")
         if prev_env and prev_env.status == PipelineStepStatus.COMPLETED and prev_env.output:
             env_sid = prev_env.output.get("session_id")
@@ -712,6 +576,8 @@ async def run_test_code_generation(
             api_key=api_key,
             max_test_cases=max_test_cases,
         )
+        if not result.get("success", False):
+            return _err(step_id, result.get("error", "Test code generation failed"), t0)
         return _ok(step_id, result, t0)
     except Exception as e:
         logger.error(f"[Pipeline][{step_id}] Error: {e}", exc_info=True)

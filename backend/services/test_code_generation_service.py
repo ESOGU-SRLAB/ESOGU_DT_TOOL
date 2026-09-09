@@ -193,14 +193,14 @@ class TestCodeGenerationService:
                     test_cases = scenario_result.get("test_cases", [])
                     for test_case in test_cases:
                         unique_cases.append({
-                            "test_case_id": test_case.get("test_case_id"),
-                            "title": test_case.get("title"),
-                            "scenario_id": test_case.get("scenario_id"),
-                            "description": test_case.get("description"),
-                            "priority": test_case.get("priority", "Medium"),
-                            "preconditions": test_case.get("preconditions", []),
-                            "steps": test_case.get("steps", []),
-                            "expected_result": test_case.get("expected_result", "")
+                            "test_case_id": test_case.get("test_case_id") or test_case.get("TestCaseID"),
+                            "title": test_case.get("title") or test_case.get("Title"),
+                            "scenario_id": test_case.get("scenario_id") or test_case.get("ScenarioID"),
+                            "description": test_case.get("description") or test_case.get("Description", ""),
+                            "priority": test_case.get("priority") or test_case.get("Priority", "Medium"),
+                            "preconditions": test_case.get("preconditions") or test_case.get("Preconditions", []),
+                            "steps": test_case.get("steps") or test_case.get("Steps", []),
+                            "expected_result": test_case.get("expected_result") or test_case.get("ExpectedResult", "")
                         })
                 
                 # 2. Old format fallback: test_cases (direct array)
@@ -208,14 +208,14 @@ class TestCodeGenerationService:
                     test_cases = output.get("test_cases", [])
                     for test_case in test_cases:
                         unique_cases.append({
-                            "test_case_id": test_case.get("test_case_id"),
-                            "title": test_case.get("title"),
-                            "scenario_id": test_case.get("scenario_id"),
-                            "description": test_case.get("description"),
-                            "priority": test_case.get("priority", "Medium"),
-                            "preconditions": test_case.get("preconditions", []),
-                            "steps": test_case.get("steps", []),
-                            "expected_result": test_case.get("expected_result", "")
+                            "test_case_id": test_case.get("test_case_id") or test_case.get("TestCaseID"),
+                            "title": test_case.get("title") or test_case.get("Title"),
+                            "scenario_id": test_case.get("scenario_id") or test_case.get("ScenarioID"),
+                            "description": test_case.get("description") or test_case.get("Description", ""),
+                            "priority": test_case.get("priority") or test_case.get("Priority", "Medium"),
+                            "preconditions": test_case.get("preconditions") or test_case.get("Preconditions", []),
+                            "steps": test_case.get("steps") or test_case.get("Steps", []),
+                            "expected_result": test_case.get("expected_result") or test_case.get("ExpectedResult", "")
                         })
                 
                 logger.info(f"Found {len(unique_cases)} test cases for process '{process_title}' from test_case_generation")

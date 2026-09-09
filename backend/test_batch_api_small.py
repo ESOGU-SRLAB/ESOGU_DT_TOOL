@@ -4,6 +4,7 @@ Bu script küçük bir test case seti ile Batch API'yi test eder
 """
 
 import asyncio
+import os
 import sys
 import os
 
@@ -64,12 +65,12 @@ async def test_small_batch():
     print(f"📊 Expected comparisons: {len(test_cases) * (len(test_cases) - 1) // 2}")
     print()
     
-    # Get API key from user
-    api_key = input("Enter your Gemini API key (or press Enter for default): ").strip()
+    # Never keep provider credentials in source or echo them to logs.
+    api_key = os.getenv("GEMINI_API_KEY") or input("Enter your Gemini API key: ").strip()
     if not api_key:
-        api_key = "AIzaSyCV-4uNhn53rh5Yp5A6IrkrG5iMvko6O4Q"
+        raise RuntimeError("GEMINI_API_KEY is required")
     
-    print(f"🔑 Using API key: {api_key[:10]}...{api_key[-5:]}")
+    print("🔑 Gemini API key loaded")
     print()
     
     try:

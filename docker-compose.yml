@@ -1,0 +1,51 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: ${APP_PORT:-8000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      INITIALIZE_PROMPTS_ON_STARTUP: ${INITIALIZE_PROMPTS_ON_STARTUP:-true}
+      MONGO_URI: mongodb://mongo:27017
+      DATABASE_NAME: ${DATABASE_NAME:-stlc_database}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      API_AUTH_ENABLED: ${API_AUTH_ENABLED:-false}
+      APP_API_KEY: ${APP_API_KEY:-}
+      MODEL_API_BASE_URL: ${MODEL_API_BASE_URL:-http://host.docker.internal:1234}
+      MODEL_IDENTIFIER: ${MODEL_IDENTIFIER:-llama-3.2-3b-instruct}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MCP_SERVER_URL: ${MCP_SERVER_URL:-http://host.docker.internal:8001}
+      EXECUTION_SERVICE_URL: ${EXECUTION_SERVICE_URL:-}
+      EXECUTION_SERVICE_TOKEN: ${EXECUTION_SERVICE_TOKEN:-}
+      EXECUTION_TIMEOUT_SECONDS: ${EXECUTION_TIMEOUT_SECONDS:-1900}
+      MONITORING_ENABLED: ${MONITORING_ENABLED:-true}
+      MONITORING_EVENT_RETENTION_DAYS: ${MONITORING_EVENT_RETENTION_DAYS:-30}
+      ARTIFACT_DIR: /app/data/artifacts
+      UPLOAD_DIR: /app/data/uploads
+    ports:
+      - "${APP_PORT:-8000}:${APP_PORT:-8000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - stlc_artifacts:/app/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  stlc_artifacts:

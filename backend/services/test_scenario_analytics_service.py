@@ -270,5 +270,16 @@ class TestScenarioAnalytics:
             logger.error(f"Error retrieving test type statistics: {e}")
             return {}
 
-# Global analytics instance
-test_scenario_analytics = TestScenarioAnalytics()
+class _LazyTestScenarioAnalytics:
+    """Preserve the legacy singleton API without connecting during app import."""
+
+    def __init__(self):
+        self._instance = None
+
+    def __getattr__(self, name):
+        if self._instance is None:
+            self._instance = TestScenarioAnalytics()
+        return getattr(self._instance, name)
+
+
+test_scenario_analytics = _LazyTestScenarioAnalytics()

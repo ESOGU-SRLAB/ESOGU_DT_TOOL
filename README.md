@@ -529,7 +529,7 @@ Primary API groups:
 - Only trusted users should be allowed to request additional package installation.
 - Apply least-privilege permissions to Remote Execution network shares.
 - Never write API keys to source files, test results, or logs.
-- CORS is intentionally broad for development; restrict allowed origins before production deployment.
+- CORS defaults to local frontend origins; set an explicit production allow-list before deployment.
 - Physical robot testing requires simulation validation, speed, torque, and workspace limits, an emergency stop, safety PLC integration, and explicit operator approval.
 
 ## Contribution and development workflow
@@ -547,3 +547,377 @@ When adding a feature:
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
+
+## External Integration and Docker Deployment
+
+The FastAPI backend can be used without the React UI. Its OpenAPI contract is
+available at `/docs` and `/openapi.json`. The stable integration surface is
+under `/api/v1`; existing UI endpoints remain unchanged.
+
+### Running locally
+
+MongoDB is required. Copy `.env.example` to `.env`, adjust the values, then:
+
+```bash
+python -m pip install -r backend/requirements.txt
+cd backend
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+`GET /health` only checks that the process is alive. `GET /ready` returns HTTP
+200 after MongoDB responds to a ping, or HTTP 503 with machine-readable JSON.
+Model providers and the external executor are intentionally not readiness
+dependencies because neither is required for the API process to start.
+
+### Running with Docker
+
+The root `Dockerfile` is the complete STLC backend image. The legacy files under
+`docker/` are not part of the normal build and are not used by the external
+execution API:
+
+```bash
+docker build -t stlc-manager-backend .
+docker run --rm -p 8000:8000 --env-file .env stlc-manager-backend
+```
+
+The database URL in `.env` must be reachable from inside the container. Do not
+use `localhost` there for a database running in another container.
+
+### Running with Docker Compose
+
+The root Compose file starts the backend and its required MongoDB dependency:
+
+```bash
+cp .env.example .env
+# Edit .env before continuing.
+docker compose up -d --build
+docker compose ps
+```
+
+PowerShell equivalent for the first command:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+For a server deployment, set `API_AUTH_ENABLED=true`, generate a strong
+`APP_API_KEY`, replace `CORS_ALLOWED_ORIGINS` with the real browser origins, and
+configure `MODEL_API_BASE_URL` plus `MODEL_IDENTIFIER`. `EXECUTION_SERVICE_URL`
+and `EXECUTION_SERVICE_TOKEN` remain optional until the external executor is
+available. Compose always supplies the internal MongoDB address
+`mongodb://mongo:27017`; do not replace it with a host `localhost` address.
+
+Verify and inspect the deployment from the Docker host:
+
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8000/ready
+curl http://localhost:8000/openapi.json
+docker compose logs -f backend
+```
+
+Stop containers without deleting persistent data:
+
+```bash
+docker compose down
+```
+
+Do not use `docker compose down -v` casually: `-v` removes the MongoDB and
+artifact named volumes.
+
+Compose persists MongoDB data and submitted artifacts in named volumes. It does
+not containerize model providers, MCP, or the external execution system. The
+default `host.docker.internal` model URL is convenient for Docker Desktop; set
+`MODEL_API_BASE_URL` to a server-reachable URL in other deployments.
+Compose maps `host.docker.internal` through Docker's host gateway for Linux
+engines as well. A host LM Studio instance must listen on an interface reachable
+from containers; merely listening on host loopback is insufficient.
+
+### Deployment and Serhat smoke test
+
+The reusable client at `scripts/external_integration_smoke.py` makes only public
+HTTP calls and represents Serhat's backend. It exits non-zero on any health,
+authentication, submission, job, or result failure.
+
+Run a quick deployment/auth/artifact check:
+
+```bash
+STLC_BASE_URL=http://localhost:8000 \
+STLC_API_KEY='<same value as APP_API_KEY>' \
+python scripts/external_integration_smoke.py --deployment-only
+```
+
+Run the complete artifact → environment → scenario → case → code workflow:
+
+```bash
+STLC_BASE_URL=http://localhost:8000 \
+STLC_API_KEY='<same value as APP_API_KEY>' \
+STLC_MODEL=llama-3.2-3b-instruct \
+python scripts/external_integration_smoke.py
+```
+
+The script first verifies missing and invalid credentials return `401`, then
+uses `X-API-Key` for authenticated calls. Override `STLC_ARTIFACT_PATH`,
+`STLC_PROCESS_TITLE`, `STLC_JOB_TIMEOUT`, or `STLC_MAX_TEST_CASES` as needed.
+Every run generates a unique process title by default.
+
+### Authentication and CORS
+
+Set `API_AUTH_ENABLED=true` and `APP_API_KEY` to a long random secret in a
+server deployment. External callers may send either `X-API-Key` or
+`Authorization: Bearer <APP_API_KEY>`.
+
+Authentication applies to `/api/v1/*`. It defaults off to preserve the current
+local frontend workflow. Configure browser origins as a comma-separated list in
+`CORS_ALLOWED_ORIGINS`; authenticated configuration rejects wildcard CORS.
+
+### External API contracts
+
+All submission endpoints accept and return JSON. Generation and execution are
+background jobs because LLM and executor calls can exceed normal HTTP request
+durations. A submission returns HTTP 202:
+
+```json
+{
+  "job_id": "job_...",
+  "status": "pending",
+  "status_url": "/api/v1/jobs/job_...",
+  "result_url": "/api/v1/jobs/job_.../result"
+}
+```
+
+Jobs transition through `pending`, `running`, `completed`, or `failed`. Job
+state is process-local and is lost on restart; run one backend worker. A durable
+shared queue is the remaining requirement before horizontally scaling workers.
+
+| Method | Endpoint | Purpose / principal request fields |
+| --- | --- | --- |
+| `POST` | `/api/v1/artifacts` | Store input: `name`, textual `content`, optional `type`, `metadata` |
+| `GET` | `/api/v1/artifacts/{artifact_id}` | Read artifact metadata (content is not echoed) |
+| `POST` | `/api/v1/generations/environment` | Persist environment setup: `process_title`, `environment_name`, `artifact_ids` |
+| `POST` | `/api/v1/generations/scenarios` | `process_title`, `artifact_ids`, optional model/prompt/test type/category |
+| `POST` | `/api/v1/generations/test-cases` | `process_title`, plus inline `scenarios` or completed `scenario_job_id` |
+| `POST` | `/api/v1/generations/test-code` | `process_title`, persisted `environment_session_id`, `environment_name`, source `artifact_ids` |
+| `POST` | `/api/v1/executions` | `test_code`, optional `metadata` and `configuration` |
+| `GET` | `/api/v1/jobs/{job_id}` | Poll job metadata/status |
+| `GET` | `/api/v1/jobs/{job_id}/result` | Fetch completed result; returns 202 while running |
+| `GET` | `/health` | Process liveness (public) |
+| `GET` | `/ready` | MongoDB readiness (public) |
+
+Environment, scenario, and case endpoints reuse the existing pipeline adapters. Test code
+generation reuses `TestCodeGenerationService`; consequently, the named process
+must already have generated/optimized test cases in MongoDB and the supplied
+environment session must come from the completed environment job. Existing
+`POST /api/pipeline/run`, status, result, and SSE endpoints remain available for
+the UI and full STLC orchestration.
+
+The state hand-off is explicit:
+
+- Artifact records are JSON files under `ARTIFACT_DIR`; adapters resolve their
+  IDs into the same file objects used by existing services.
+- Environment setup persists under
+  `session_history.processes.environment_setup`; its submission response exposes
+  the generated `session_id` required by code generation.
+- Scenario generation reads the prompt collections and persists under
+  `session_history.processes.test_scenario_generation`.
+- Test-case generation consumes the completed scenario job (or typed inline
+  scenarios), then persists under `processes.test_case_generation` with the
+  caller-supplied `process_title`.
+- Test-code generation uses that same `process_title` to find cases and the
+  environment `session_id` to find framework/language setup. Results persist
+  under `processes.test_code_generation`.
+
+Use a unique `process_title` for each concurrently active external workflow.
+The existing test-code service deliberately resolves persisted cases by title,
+so reusing one title for overlapping runs can make the selected case set
+ambiguous even though job IDs, session IDs, and artifact filenames are unique.
+
+The frontend previously supplied file-type labels, process titles, model
+selection, scenario field conversion, and prompt selection. The external API
+now normalizes `requirement` artifacts, returns every generated session ID,
+accepts the process title/model explicitly, converts stored scenario fields,
+and falls back to the configured server model and database prompt collections.
+
+Validation, authentication, and job failures use this shape (with fields
+omitted when not applicable):
+
+```json
+{
+  "error_code": "GENERATION_FAILED",
+  "message": "Test scenario generation failed.",
+  "details": "sanitized diagnostic information",
+  "job_id": "job_..."
+}
+```
+
+### Example external request
+
+This example shows the real required external client → STLC → executor sequence. The
+environment and scenario jobs are independent and may run in parallel, but both
+must be complete before test-code generation. Artifact type `requirement`
+is normalized to the existing service's `Requirement Document` type.
+
+```python
+import os
+import time
+import requests
+
+BASE_URL = "https://stlc.example.com"
+HEADERS = {
+    "Authorization": f"Bearer {os.environ['STLC_API_KEY']}",
+    "Content-Type": "application/json",
+}
+
+def submit(path, payload):
+    response = requests.post(BASE_URL + path, headers=HEADERS, json=payload, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+def wait_for(job):
+    while True:
+        status = requests.get(BASE_URL + job["status_url"], headers=HEADERS, timeout=30)
+        status.raise_for_status()
+        state = status.json()
+        if state["status"] == "completed":
+            result = requests.get(BASE_URL + job["result_url"], headers=HEADERS, timeout=30)
+            result.raise_for_status()
+            return result.json()["result"]
+        if state["status"] == "failed":
+            raise RuntimeError(state["error"])
+        time.sleep(1)
+
+# 1. Persist the input artifact.
+artifact = submit("/api/v1/artifacts", {
+    "name": "requirements.txt",
+    "type": "requirement",
+    "content": "The user can reset a password.",
+    "metadata": {"external_project_id": "cloud-project-42"},
+})
+
+# 2. Persist environment setup. The returned session_id is used by code generation.
+environment_job = submit("/api/v1/generations/environment", {
+    "process_title": "Password reset",
+    "environment_name": "Password reset API tests",
+    "artifact_ids": [artifact["artifact_id"]],
+})
+environment = wait_for(environment_job)
+
+# 3–4. Generate scenarios and poll the job.
+scenario_job = submit("/api/v1/generations/scenarios", {
+    "process_title": "Password reset",
+    "artifact_ids": [artifact["artifact_id"]],
+    "test_type": "Functional",
+    "test_category": "Positive",
+})
+scenarios = wait_for(scenario_job)
+
+# 5–6. The scenario job ID carries the actual scenario output into case generation.
+case_job = submit("/api/v1/generations/test-cases", {
+    "process_title": "Password reset",
+    "scenario_job_id": scenario_job["job_id"],
+    "artifact_ids": [artifact["artifact_id"]],
+})
+test_cases = wait_for(case_job)
+
+# 7–8. process_title locates persisted cases; environment_session_id locates setup.
+code_job = submit("/api/v1/generations/test-code", {
+    "process_title": "Password reset",
+    "environment_session_id": environment_job["session_id"],
+    "environment_name": "Password reset generated code",
+    "artifact_ids": [artifact["artifact_id"]],
+    "max_test_cases": 1,
+})
+code_result = wait_for(code_job)
+generated = code_result["generated_tests"][0]
+
+# 9–10. Submit to the configured remote executor and retrieve its result.
+execution_job = submit("/api/v1/executions", {
+    "test_code": generated["code"],
+    "language": generated.get("language"),
+    "framework": generated.get("framework"),
+    "test_case_id": generated.get("test_case_id"),
+    "session_id": code_job["session_id"],
+    "artifact_ids": [artifact["artifact_id"]],
+    "metadata": {"external_project_id": "cloud-project-42"},
+    "configuration": {"timeout_seconds": 300},
+})
+execution_result = wait_for(execution_job)
+```
+
+### Configuration reference
+
+- `APP_HOST`, `APP_PORT`, `APP_RELOAD`, `LOG_LEVEL`
+- `INITIALIZE_PROMPTS_ON_STARTUP`
+- `MONGO_URI`, `DATABASE_NAME`
+- `CORS_ALLOWED_ORIGINS`
+- `API_AUTH_ENABLED`, `APP_API_KEY`
+- `MODEL_API_BASE_URL`, `MODEL_IDENTIFIER`, `MODEL_API_KEY`
+- `MCP_SERVER_URL`
+- `EXECUTION_SERVICE_URL`, `EXECUTION_SERVICE_TOKEN`, `EXECUTION_TIMEOUT_SECONDS`
+- `ARTIFACT_DIR`, `UPLOAD_DIR`
+
+### Repository and responsibility boundary
+
+STLC Manager generates scenarios, cases, and test code, submits generated code
+to a configured remote service, and consumes its standardized result. The
+external executor receives that code, runs it in its independently managed
+HIL/robot environment, and returns the result.
+
+> The HIL/docker harness implementation is not part of the STLC Manager
+> repository and is deployed independently.
+
+The STLC repository neither imports nor builds the executor implementation. A
+deployment needs only the remote contract configuration, for example:
+
+```dotenv
+EXECUTION_SERVICE_URL=http://executor-host:8090
+EXECUTION_SERVICE_TOKEN=change-me
+EXECUTION_TIMEOUT_SECONDS=1900
+```
+
+`ExecutionAdapter` defines this boundary. The included
+`HttpExecutionClient` sends `POST {EXECUTION_SERVICE_URL}/executions` and parses
+the standardized fields `execution_id`, `status`, timestamps, pass/fail counts,
+logs, error, and artifacts. If no URL is configured, STLC startup, readiness,
+and every generation function remain available; only `POST /api/v1/executions`
+returns structured HTTP 503 `EXECUTION_SERVICE_NOT_CONFIGURED`.
+
+## Monitoring Integration
+
+STLC publishes consumer-neutral lifecycle telemetry from the existing pipeline
+and asynchronous job paths. Monitoring is optional and never calls a dashboard
+directly. Events are retained in MongoDB's `monitoring_events` collection and
+fanned out to live subscribers inside the backend process.
+
+- History: `GET /api/v1/monitoring/events` (bounded to 500; default 100)
+- Single event: `GET /api/v1/monitoring/events/{event_id}`
+- Live SSE: `GET /api/v1/monitoring/events/stream`
+- Authentication: the same `X-API-Key` or Bearer token used by `/api/v1`
+- Filters: `process_id`, `process_title`, `session_id`, `job_id`,
+  `execution_id`, `module`, `event_type`, `status`, and `since`
+
+The event taxonomy is `pipeline.started|completed|failed`,
+`module.started|progress|completed|failed`, and
+`execution.submitted|started|completed|failed`. Module values are
+`artifact_ingestion`, `environment_setup`, `scenario_generation`,
+`test_case_generation`, `test_code_generation`, and `test_execution`.
+Events contain correlation IDs, status/progress, duration, small metrics and
+sanitized metadata; generated code, prompts, artifacts, and credentials are
+excluded.
+
+```bash
+curl -H "X-API-Key: $APP_API_KEY" \
+  "http://localhost:8000/api/v1/monitoring/events?session_id=session-123&limit=100"
+
+curl -N -H "Authorization: Bearer $APP_API_KEY" \
+  -H "Last-Event-ID: evt_previous" \
+  "http://localhost:8000/api/v1/monitoring/events/stream?session_id=session-123"
+```
+
+`MONITORING_ENABLED` controls emission and
+`MONITORING_EVENT_RETENTION_DAYS` controls the MongoDB TTL (30 by default, 0
+disables expiry). SSE fan-out and asynchronous jobs are process-local: use one
+worker for ordered live delivery, and reconstruct state from REST history after
+a restart or reconnect. MongoDB history remains authoritative across restarts.
+Any monitoring consumer is deployed independently; none is required to build,
+start, or operate STLC Manager.

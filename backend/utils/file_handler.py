@@ -1,11 +1,13 @@
 import os
 import xml.etree.ElementTree as ET
+import logging
 from utils.XmlParser import parse_uml_xml_to_json
 import json
 from utils.UmlToXml import convert_uml_to_xml
 
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+logger = logging.getLogger(__name__)
 
 class FileHandler:
     def __init__(self):
@@ -14,7 +16,8 @@ class FileHandler:
     async def save_files(self, files):
         file_paths = []
         for file in files:
-            path = os.path.join(UPLOAD_DIR, file.filename)
+            storage_name = os.path.basename(getattr(file, "storage_name", file.filename))
+            path = os.path.join(UPLOAD_DIR, storage_name)
             with open(path, "wb") as f:
                 f.write(await file.read())
             file_paths.append(path)
@@ -25,7 +28,7 @@ class FileHandler:
             if path.lower().endswith('.uml'):
                 # .uml dosyasını XML string'e çevir ve döndür
                 xml_content = convert_uml_to_xml(path)
-                print(f"[FileHandler] UML'den XML'e (ilk 500 karakter):\n{xml_content[:500]}")
+                logger.info("Converted UML input to XML (%d characters)", len(xml_content))
                 return xml_content
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -33,10 +36,10 @@ class FileHandler:
                     # XML'i JSON'a çevir
                     json_obj = parse_uml_xml_to_json(content)
                     json_str = json.dumps(json_obj, ensure_ascii=False, indent=2)
-                    print(f"[FileHandler] XML'den JSON üretildi (ilk 500 karakter):\n{json_str[:500]}")
+                    logger.info("Converted XML input to JSON (%d characters)", len(json_str))
                     return json_str
                 else:
-                    print(f"[FileHandler] Okunan dosya içeriği (ilk 500 karakter):\n{content[:500]}")
+                    logger.info("Read input file %s (%d characters)", os.path.basename(path), len(content))
                 return content
         except UnicodeDecodeError:
             # Farklı encoding ile tekrar dene
@@ -45,10 +48,10 @@ class FileHandler:
                 if path.lower().endswith('.xml'):
                     json_obj = parse_uml_xml_to_json(content)
                     json_str = json.dumps(json_obj, ensure_ascii=False, indent=2)
-                    print(f"[FileHandler] XML'den JSON üretildi (ilk 500 karakter, ISO-8859-9):\n{json_str[:500]}")
+                    logger.info("Converted ISO-8859-9 XML input to JSON (%d characters)", len(json_str))
                     return json_str
                 else:
-                    print(f"[FileHandler] Okunan dosya içeriği (ilk 500 karakter, ISO-8859-9):\n{content[:500]}")
+                    logger.info("Read ISO-8859-9 input file %s (%d characters)", os.path.basename(path), len(content))
                 return content
         except Exception as e:
             print(f"[FileHandler] Dosya okunamadı: {str(e)}")

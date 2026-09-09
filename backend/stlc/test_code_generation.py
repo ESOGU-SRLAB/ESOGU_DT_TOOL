@@ -11,7 +11,11 @@ from typing import Optional, List
 
 router = APIRouter()
 logger = logging.getLogger("test_code_generation")
-test_code_service = TestCodeGenerationService()
+
+
+def _service() -> TestCodeGenerationService:
+    """Create the DB-backed service per request instead of at application import."""
+    return TestCodeGenerationService()
 
 @router.get("/environment-setups")
 async def get_environment_setups():
@@ -19,7 +23,7 @@ async def get_environment_setups():
     Mevcut environment setup kayıtlarını getirir
     """
     try:
-        setups = test_code_service.get_environment_setups()
+        setups = _service().get_environment_setups()
         return {
             "success": True,
             "data": setups,
@@ -35,7 +39,7 @@ async def get_available_process_titles():
     Mevcut process title'ları getirir (test case optimization'dan)
     """
     try:
-        process_titles = test_code_service.get_available_process_titles()
+        process_titles = _service().get_available_process_titles()
         return {
             "success": True,
             "data": process_titles,
@@ -51,7 +55,7 @@ async def get_test_case_count(process_title: str):
     Belirli bir process title için unique test case sayısını döndürür
     """
     try:
-        unique_test_cases = test_code_service.get_unique_test_cases_by_process_title(process_title)
+        unique_test_cases = _service().get_unique_test_cases_by_process_title(process_title)
         return {
             "success": True,
             "process_title": process_title,
@@ -68,7 +72,7 @@ async def get_process_names_with_tests():
     Used by Robot Test Execution Panel to populate process dropdown
     """
     try:
-        process_names = test_code_service.get_process_names_with_generated_tests()
+        process_names = _service().get_process_names_with_generated_tests()
         return {
             "success": True,
             "process_names": process_names,
@@ -91,7 +95,7 @@ async def get_tests_by_process_name(process_name: str):
         List of generated tests with test_id, test_case_name, status, test_code
     """
     try:
-        tests = test_code_service.get_generated_tests_by_process_name(process_name)
+        tests = _service().get_generated_tests_by_process_name(process_name)
         return {
             "success": True,
             "process_name": process_name,
@@ -147,7 +151,7 @@ async def process_test_code_generation(
         if api_key:
             logger.info(f"API key preview: {api_key[:15]}...")
         
-        result = await test_code_service.generate_test_codes(
+        result = await _service().generate_test_codes(
             process_title=process_title,
             environment_session_id=environment_session_id,
             source_files=files,
@@ -209,7 +213,7 @@ async def generate_test_code(
             logger.info(f"API key preview: {api_key[:15]}...")
         logger.info(f"Session ID: {session_id}")
         
-        result = await test_code_service.generate_test_codes(
+        result = await _service().generate_test_codes(
             process_title=process_title,
             environment_session_id=environment_session_id,
             source_files=files,
