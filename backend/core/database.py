@@ -8,8 +8,7 @@ MongoDB bağlantısını ve temel veritabanı işlemlerini yönetir.
 import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient
-import certifi
-import os
+from core.settings import get_settings
 
 # Logger settings
 logger = logging.getLogger(__name__)
@@ -20,7 +19,7 @@ def get_db():
     Returns a synchronous MongoDB database connection
     """
     try:
-        logger.info(f"Connecting to MongoDB (sync): {MONGO_URI}")
+        logger.info("Connecting to MongoDB (sync)")
         client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
 
         # Test the connection
@@ -32,13 +31,13 @@ def get_db():
         logger.error(f"MongoDB sync connection failed: {str(e)}")
         raise
 
-MONGO_URI = "mongodb://localhost:27017"
-DATABASE_NAME = "stlc_database"
+_settings = get_settings()
+MONGO_URI = _settings.mongo_uri
+DATABASE_NAME = _settings.database_name
 
 async def get_database():
     try:
-        print("MongoDB URI:", MONGO_URI)
-        logger.info(f"Connecting to MongoDB (async): {MONGO_URI}")
+        logger.info("Connecting to MongoDB (async)")
         client = AsyncIOMotorClient(
             MONGO_URI,
             serverSelectionTimeoutMS=5000

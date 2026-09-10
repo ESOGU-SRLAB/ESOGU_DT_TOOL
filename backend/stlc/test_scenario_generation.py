@@ -18,11 +18,6 @@ from utils.text_splitter import count_tokens
 
 logger = logging.getLogger(__name__)
 
-try:
-    from services.test_scenario_analytics_service import test_scenario_analytics
-except ImportError:
-    test_scenario_analytics = None
-    logger.warning("Analytics service not available - continuing without analytics tracking")
 from services.test_scenario_analytics_service import test_scenario_analytics
 
 logger = logging.getLogger(__name__)

@@ -207,14 +207,13 @@ const TestCodeGeneration = ({
     // Check if we have the required API key for selected model
     console.log('🔍 Debug - Current model:', model);
     console.log('🔍 Debug - Available API keys:', apiKeys);
-    console.log('🔍 Debug - API keys object keys:', Object.keys(apiKeys));
-    console.log('🔍 Debug - Full API keys structure:', JSON.stringify(apiKeys, null, 2));
+    console.log('🔍 Debug - API key providers configured:', Object.keys(apiKeys).length);
     
     let requiredApiKey = null;
     // Check if model requires API key (Gemini models only, not local LM Studio models)
     if (model.startsWith('gemini')) {
       requiredApiKey = apiKeys.google;  // Gemini uses google key
-      console.log('🔍 Debug - Selected Google/Gemini key:', requiredApiKey ? `${requiredApiKey.substring(0, 10)}...` : 'NOT FOUND');
+      console.log('🔍 Debug - Google/Gemini key configured:', requiredApiKey ? 'YES' : 'NO');
       
       if (!requiredApiKey) {
         console.log('❌ Debug - API key validation failed for Gemini');
@@ -298,7 +297,7 @@ const TestCodeGeneration = ({
         
         if (selectedApiKey) {
           formData.append('api_key', selectedApiKey);
-          console.log(`🔑 Added API key for model ${model}: ${selectedApiKey.substring(0, 10)}...`);
+          console.log(`🔑 API key configured for model ${model}`);
         } else {
           console.log(`⚠️ No API key found for model ${model}`);
         }
@@ -312,7 +311,7 @@ const TestCodeGeneration = ({
         console.log('📦 FormData contents:');
         for (let pair of formData.entries()) {
           if (pair[0] === 'api_key') {
-            console.log(`  ${pair[0]}: ${pair[1] ? pair[1].substring(0, 10) + '...' : 'NOT SET'}`);
+            console.log(`  ${pair[0]}: ${pair[1] ? 'SET' : 'NOT SET'}`);
           } else if (pair[0] === 'files') {
             console.log(`  ${pair[0]}: ${pair[1].name} (${pair[1].size} bytes)`);
           } else {

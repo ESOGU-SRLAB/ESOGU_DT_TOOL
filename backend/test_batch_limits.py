@@ -4,13 +4,16 @@ Bu script batch API'nin maksimum request sayısını test eder
 """
 
 import asyncio
+import os
 from google import genai
 from google.genai import types
 
 async def test_batch_limits():
     """Test batch API with different request counts"""
     
-    api_key = "AIzaSyCV-4uNhn53rh5Yp5A6IrkrG5iMvko6O4Q"
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is required")
     client = genai.Client(api_key=api_key)
     
     # Test different request counts

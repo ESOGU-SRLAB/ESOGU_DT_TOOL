@@ -5,7 +5,9 @@ os.environ.setdefault('LINES', '24')
 
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from stlc.code_review import router as code_review_router
 from routers.test_scenario_generation_router import router as test_scenario_router
 from routers.test_scenario_prompt_router import router as test_scenario_prompt_router
@@ -33,6 +35,10 @@ from routers.ros2_execution_router import router as ros2_execution_router
 from routers.robot_execution_router import router as robot_execution_router
 from routers.remote_execution_router import router as remote_execution_router
 from routers.pipeline_router import router as pipeline_router
+from routers.operations_router import router as operations_router
+from routers.external_api_router import router as external_api_router
+from routers.monitoring_router import router as monitoring_router
+from core.settings import get_settings
 # from routers.test_scenario_analytics_router import router as test_scenario_analytics_router
 
 # Auto-initialization import
@@ -47,7 +53,11 @@ from core.prompt_manager import (
 )
 
 # Logger configuration
-logging.basicConfig(level=logging.INFO)
+settings = get_settings()
+logging.basicConfig(
+    level=getattr(logging, settings.log_level, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 def initialize_application():
@@ -96,18 +106,10 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# CORS ayarları
+# CORS settings are supplied as a comma-separated environment variable.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React uygulamanızın çalıştığı port
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",  # Vite default port
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",  # Vite alternative port
-        "http://127.0.0.1:5174",
-        "*"  # Geliştirme aşamasında tüm originlere izin vermek için
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -139,11 +141,56 @@ app.include_router(ros2_execution_router)  # ROS2 Docker execution router
 app.include_router(robot_execution_router)  # Robot test execution router (ROS 2 + Gazebo)
 app.include_router(remote_execution_router)  # Remote/Local execution folder management for robot scenarios
 app.include_router(pipeline_router, prefix="/api/pipeline")  # Pipeline orchestration router
+app.include_router(operations_router)
+app.include_router(external_api_router)
+app.include_router(monitoring_router)
 # app.include_router(test_scenario_analytics_router, prefix="/api")  # Test scenario analytics
 
 @app.get("/")
 def read_root():
     return {"message": "STLC Manager Backend is running!"}
+
+
+@app.exception_handler(HTTPException)
+async def structured_external_http_error(request: Request, exc: HTTPException):
+    """Keep legacy errors compatible while standardizing the external API."""
+    if request.url.path.startswith("/api/v1"):
+        detail = exc.detail
+        if not isinstance(detail, dict):
+            detail = {
+                "error_code": "HTTP_ERROR",
+                "message": str(detail),
+                "details": None,
+            }
+        detail.setdefault("details", None)
+        detail.setdefault("job_id", None)
+        return JSONResponse(status_code=exc.status_code, content=detail, headers=exc.headers)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def structured_external_validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/v1"):
+        return JSONResponse(status_code=422, content={
+            "error_code": "VALIDATION_ERROR",
+            "message": "Request validation failed.",
+            "details": exc.errors(),
+            "job_id": None,
+        })
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def structured_unhandled_error(request: Request, exc: Exception):
+    logger.error("Unhandled request failure on %s", request.url.path, exc_info=True)
+    if request.url.path.startswith("/api/v1"):
+        return JSONResponse(status_code=500, content={
+            "error_code": "INTERNAL_ERROR",
+            "message": "An unexpected backend error occurred.",
+            "details": None,
+            "job_id": None,
+        })
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 @app.get("/api/health/prompts")
 async def check_prompts_status():
@@ -195,7 +242,15 @@ async def startup_event():
     GitHub'dan projeyi indirip ilk kez çalıştırdığınızda tüm prompt'lar
     otomatik olarak database'e eklenecek.
     """
-    initialize_application()
+    if settings.initialize_prompts_on_startup:
+        initialize_application()
+    else:
+        logger.info("Prompt initialization skipped by configuration")
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "app:app",
+        host=settings.app_host,
+        port=settings.app_port,
+        reload=settings.app_reload,
+    )

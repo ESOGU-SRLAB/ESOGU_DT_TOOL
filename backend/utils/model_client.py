@@ -15,7 +15,7 @@ backend_dir = os.path.dirname(os.path.dirname(__file__))
 if backend_dir not in sys.path:
     sys.path.append(backend_dir)
 # Import from the config.py file directly
-from config import MODEL_IDENTIFIER
+from config import MODEL_API_BASE_URL, MODEL_IDENTIFIER, MODEL_API_KEY
 import google.generativeai as genai
 import json
 import time
@@ -37,10 +37,10 @@ def get_llm_instance(model_name: str = None, temperature: float = 0.7):
     :raises ConnectionError: Bağlantı hataları için.
     """
     # Model seçimi - eğer model_name verilmemişse default kullan
-    selected_model = model_name if model_name else config.MODEL_IDENTIFIER
+    selected_model = model_name if model_name else MODEL_IDENTIFIER
     
     # 1. Yapılandırma kontrolü
-    if not config.MODEL_API_BASE_URL:
+    if not MODEL_API_BASE_URL:
         logger.error("MODEL_API_BASE_URL boş olamaz.")
         raise ValueError("MODEL_API_BASE_URL yapılandırması eksik.")
     if not selected_model:
@@ -49,15 +49,15 @@ def get_llm_instance(model_name: str = None, temperature: float = 0.7):
     
     # 2. Model nesnesi oluşturma ve hata yakalama
     try:
-        logger.info(f"LLM nesnesi oluşturuluyor: {selected_model} @ {config.MODEL_API_BASE_URL}")
+        logger.info(f"LLM nesnesi oluşturuluyor: {selected_model} @ configured model endpoint")
         # LM Studio uses /v1/ prefix for OpenAI compatibility
-        api_base_url = config.MODEL_API_BASE_URL if config.MODEL_API_BASE_URL.endswith('/v1') else f"{config.MODEL_API_BASE_URL}/v1"
+        api_base_url = MODEL_API_BASE_URL if MODEL_API_BASE_URL.endswith('/v1') else f"{MODEL_API_BASE_URL}/v1"
         logger.info(f"Using API base URL: {api_base_url}")
         
         llm = ChatOpenAI(
             model_name=selected_model,
             openai_api_base=api_base_url,
-            openai_api_key="not-needed",  # Gerekirse environment'tan çekilebilir
+            openai_api_key=MODEL_API_KEY or "not-needed",
             temperature=temperature
         )
         
@@ -99,7 +99,8 @@ class LLMClient:
         # Logger'ı en başta tanımla (hata yakalamada kullanılacak)
         self.logger = logging.getLogger("LLMClient")
         
-        self.api_url = "http://localhost:1234/v1"
+        base_url = MODEL_API_BASE_URL.rstrip("/")
+        self.api_url = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
         # Default model kullan veya parametre olarak verilen modeli al
         self.original_key = model_name  # Original key'i sakla (frontend'den gelen key)
         
@@ -113,7 +114,7 @@ class LLMClient:
             # Local model için identifier'ı al
             self.model_name = self.get_model_identifier(model_name) if model_name else MODEL_IDENTIFIER
         
-        self.api_key = api_key  # Gemini API key'i için
+        self.api_key = api_key or MODEL_API_KEY  # Request override, then server configuration
         self.use_case = use_case  # 'code_review', 'test_generation', 'test_reporting', etc.
         
         self.logger.info(f"🔧 [LLMClient] Initialized:")

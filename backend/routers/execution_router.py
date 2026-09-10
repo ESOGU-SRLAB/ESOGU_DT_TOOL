@@ -9,6 +9,7 @@ and communicating with the MCP server
 import logging
 import aiohttp
 import re
+import os
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -147,7 +148,7 @@ def parse_execution_stats(terminal_output: str) -> Dict[str, Any]:
     return stats
 
 # MCP Server configuration
-MCP_SERVER_URL = "http://localhost:8001"
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8001")
 
 class TestExecutionRequest(BaseModel):
     process_name: str  # Required - Test Code Generation process name

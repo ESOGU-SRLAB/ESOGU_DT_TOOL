@@ -14,7 +14,7 @@ try {
 } catch {
     Write-Host "   ❌ Backend çalışmıyor!" -ForegroundColor Red
     Write-Host "   ℹ️  Başlatmak için:" -ForegroundColor Yellow
-    Write-Host "      cd C:\Users\Cem\Desktop\STLC-Manager\backend" -ForegroundColor Gray
+    Write-Host "      cd <STLC-Manager>\backend" -ForegroundColor Gray
     Write-Host "      python -m uvicorn app:app --reload --host localhost --port 8000" -ForegroundColor Gray
 }
 Write-Host ""
@@ -27,7 +27,7 @@ try {
 } catch {
     Write-Host "   ❌ Frontend çalışmıyor!" -ForegroundColor Red
     Write-Host "   ℹ️  Başlatmak için:" -ForegroundColor Yellow
-    Write-Host "      cd C:\Users\Cem\Desktop\STLC-Manager\frontend" -ForegroundColor Gray
+    Write-Host "      cd <STLC-Manager>\frontend" -ForegroundColor Gray
     Write-Host "      npm run dev" -ForegroundColor Gray
 }
 Write-Host ""

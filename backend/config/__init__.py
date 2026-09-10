@@ -4,14 +4,11 @@ config package
 Application configuration settings
 """
 
-import os
-from dotenv import load_dotenv
+from core.settings import get_settings
 
-load_dotenv()
-
-# MongoDB Configuration
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-
-# LM Studio / Model Configuration
-MODEL_API_BASE_URL = os.getenv("MODEL_API_BASE_URL", "http://localhost:1234")
-MODEL_IDENTIFIER = os.getenv("MODEL_IDENTIFIER", "llama-3.2-3b-instruct")
+_settings = get_settings()
+MONGO_URI = _settings.mongo_uri
+DATABASE_NAME = _settings.database_name
+MODEL_API_BASE_URL = _settings.model_api_base_url
+MODEL_IDENTIFIER = _settings.model_identifier
+MODEL_API_KEY = _settings.model_api_key

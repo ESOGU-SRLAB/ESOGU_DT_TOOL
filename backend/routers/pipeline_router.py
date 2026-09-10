@@ -30,6 +30,7 @@ from pipeline.pipeline_models import (
     StepResult,
 )
 from pipeline.step_adapters import execute_step
+from services.monitoring_event_service import monitoring_event_service
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,31 @@ _pipeline_states: Dict[str, Dict[str, Any]] = {}
 
 # session_id -> asyncio.Event  (set to request stop)
 _stop_events: Dict[str, asyncio.Event] = {}
+
+_MONITORING_MODULES = {
+    "environment-setup": "environment_setup",
+    "test-scenario-generation": "scenario_generation",
+    "test-case-generation": "test_case_generation",
+    "test-code-generation": "test_code_generation",
+    "test-execution": "test_execution",
+}
+
+
+def _result_metrics(step_id: str, result: StepResult) -> Dict[str, Any]:
+    output = result.output or {}
+    metrics: Dict[str, Any] = {}
+    if step_id == "test-scenario-generation":
+        payload = output.get("test_scenarios", output)
+        metrics["scenario_count"] = len(payload.get("TestScenarios", [])) if isinstance(payload, dict) else 0
+    elif step_id == "test-case-generation":
+        cases = output.get("test_case_results") or output.get("test_cases") or []
+        summary = output.get("summary") or {}
+        metrics["scenario_count"] = len(cases) if isinstance(cases, list) else 0
+        metrics["test_case_count"] = int(summary.get("total_test_cases", len(cases) if isinstance(cases, list) else 0))
+    elif step_id == "test-code-generation":
+        tests = output.get("generated_tests") or output.get("test_cases") or []
+        metrics["generated_test_count"] = len(tests) if isinstance(tests, list) else 0
+    return metrics
 
 
 def _get_state(session_id: str) -> Optional[Dict[str, Any]]:
@@ -88,6 +114,12 @@ async def _run_pipeline_background(
     stop_event: asyncio.Event,
 ) -> None:
     previous_results: Dict[str, StepResult] = {}
+    pipeline_started = time.monotonic()
+
+    await monitoring_event_service.emit_safely(
+        "pipeline.started", session_id=req.session_id, process_title=req.process_title,
+        status="running", progress=0, metadata={"steps_total": len(ordered_steps)},
+    )
 
     _push_event(state, "pipeline_started", {
         "session_id": req.session_id,
@@ -104,6 +136,11 @@ async def _run_pipeline_background(
                 "stopped_at_step": step_id,
             })
             logger.info(f"[Pipeline] Stopped at step {step_id}")
+            await monitoring_event_service.emit_safely(
+                "pipeline.failed", session_id=req.session_id, process_title=req.process_title,
+                status="stopped", duration_ms=int((time.monotonic() - pipeline_started) * 1000),
+                error={"error_code": "PIPELINE_STOPPED", "message": "Pipeline was stopped."},
+            )
             return
 
         state["current_step"] = step_id
@@ -112,6 +149,15 @@ async def _run_pipeline_background(
             "session_id": req.session_id,
         })
         logger.info(f"[Pipeline] Starting step: {step_id}")
+        module = _MONITORING_MODULES.get(step_id)
+        step_started = time.monotonic()
+        if module:
+            await monitoring_event_service.emit_safely(
+                "module.started", session_id=req.session_id, process_title=req.process_title,
+                module=module, status="running",
+                progress=(state["steps_completed"] / max(len(ordered_steps), 1)) * 100,
+                metadata={"step_id": step_id, "model": req.global_model},
+            )
 
         try:
             result: StepResult = await execute_step(step_id, req, previous_results)
@@ -136,6 +182,13 @@ async def _run_pipeline_background(
                 "output_keys": list(result.output.keys()) if result.output else [],
             })
             logger.info(f"[Pipeline] Step completed: {step_id} ({result.duration_seconds:.1f}s)")
+            if module:
+                await monitoring_event_service.emit_safely(
+                    "module.completed", session_id=req.session_id, process_title=req.process_title,
+                    module=module, status="completed", progress=100,
+                    duration_ms=int((time.monotonic() - step_started) * 1000),
+                    metrics=_result_metrics(step_id, result), metadata={"step_id": step_id},
+                )
         else:
             # Step failed – stop the pipeline
             _push_event(state, "step_failed", {
@@ -153,6 +206,18 @@ async def _run_pipeline_background(
                 "failed_step": step_id,
                 "error": result.error,
             })
+            if module:
+                await monitoring_event_service.emit_safely(
+                    "module.failed", session_id=req.session_id, process_title=req.process_title,
+                    module=module, status="failed",
+                    duration_ms=int((time.monotonic() - step_started) * 1000),
+                    error={"error_code": "PIPELINE_STEP_FAILED", "message": f"Pipeline step {step_id} failed."},
+                )
+            await monitoring_event_service.emit_safely(
+                "pipeline.failed", session_id=req.session_id, process_title=req.process_title,
+                status="failed", duration_ms=int((time.monotonic() - pipeline_started) * 1000),
+                error={"error_code": "PIPELINE_FAILED", "message": f"Pipeline step {step_id} failed."},
+            )
             return
 
     # All steps completed successfully
@@ -165,6 +230,12 @@ async def _run_pipeline_background(
         "steps_completed": state["steps_completed"],
     })
     logger.info(f"[Pipeline] All {len(ordered_steps)} steps completed for session {req.session_id}")
+    await monitoring_event_service.emit_safely(
+        "pipeline.completed", session_id=req.session_id, process_title=req.process_title,
+        status="completed", progress=100,
+        duration_ms=int((time.monotonic() - pipeline_started) * 1000),
+        metrics={"steps_completed": state["steps_completed"]},
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -690,8 +690,7 @@ async def debug_session_structure(session_id: str):
             "message": f"Debug failed: {str(e)}"
         }
 
-@router.post("/generate-test-cases")
-async def generate_test_cases_for_scenarios(request: Request):
+async def _generate_test_cases_for_scenarios_impl(request: Request):
     """
     Generate test cases for selected test scenarios using LM Studio.
     Each selected scenario gets its own POST request.
@@ -1219,3 +1218,11 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
     except Exception as e:
         logger.error(f"[TestCaseGeneration] Error in generate_test_cases_for_scenarios: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-test-cases")
+async def generate_test_cases_for_scenarios(request: Request):
+    """Backward-compatible UI route using the shared generation entry point."""
+    from services.test_case_generation_service import TestCaseGenerationService
+
+    return await TestCaseGenerationService().generate(await request.json())
