@@ -10,11 +10,17 @@ import json
 import time
 import uuid
 import traceback
+import inspect
 from utils.model_client import LLMClient
 from core.prompt_manager import get_prompts_for_step, save_session_data, get_base_prompt
 from core.file_handler import FileHandler
 from utils.validation import validate_output_format
 from utils.text_splitter import count_tokens
+from services.project_structure_service import (
+    EXECUTION_GROUNDING_RULES,
+    build_project_structure,
+    project_structure_prompt_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +107,13 @@ Generate the test scenarios now following the exact JSON structure above:"""
 
     return optimized_prompt
 
-def create_customise_test_prompt(test_type, test_category, base_test_prompt, document_content):
+def create_customise_test_prompt(
+    test_type,
+    test_category,
+    base_test_prompt,
+    document_content,
+    project_structure=None,
+):
     """
     Create a customized test prompt based on the base test prompt, test type, category, and document content.
     This generates the generatedCustomPrompt that will be combined with scoring and instruction elements.
@@ -117,6 +129,11 @@ You are an expert prompt engineer in software test process. Generate a customize
 - Test Category: {test_category}
 - Base Test Prompt: {base_test_prompt if base_test_prompt else "Use general testing principles"}
 - Document Content: {document_content if document_content else "No specific document content provided"}
+
+{EXECUTION_GROUNDING_RULES}
+
+**PROJECT AST MANIFEST:**
+{project_structure_prompt_context(project_structure)}
 
 **ROLE FOR TEST SCENARIO GENERATION (select the most relevant):**
 - ISTQB Test Analyst: Apply equivalence partitioning, boundary value analysis, decision tables, and state transition testing to derive positive, negative, and edge-case scenarios with traceability to requirements.
@@ -155,6 +172,10 @@ async def generate_prompt(input_data, max_retries=3):
     model_name = input_data.get("model", "llama3.2:3b")
     test_prompt = input_data.get("testPrompt", "")  # Base test prompt from frontend
     file_contents = input_data.get("fileContents", [])  # Array of file contents from fileProcessMappings
+    source_files = input_data.get("sourceFiles", [])
+    project_structure = input_data.get("projectStructure") or {}
+    if not project_structure and isinstance(source_files, list):
+        project_structure = build_project_structure(source_files)
     process_title = input_data.get("process_title", "")  # Get process title directly from user input without fallback
     session_id = input_data.get("session_id")  # Get session_id if available
     api_key = input_data.get("api_key")  # API key extraction
@@ -210,7 +231,13 @@ async def generate_prompt(input_data, max_retries=3):
     logger.info(f"[DEBUG] Final model selection: {model_name} (token count: {total_token_count})")
 
     # Create a customised test prompt based on the provided inputs (without scoring/instruction elements)
-    customised_prompt = create_customise_test_prompt(test_type, test_category, test_prompt, document_content)
+    customised_prompt = create_customise_test_prompt(
+        test_type,
+        test_category,
+        test_prompt,
+        document_content,
+        project_structure,
+    )
     
     # Initialize the number of attempts
     attempts = 0
@@ -262,7 +289,12 @@ async def generate_prompt(input_data, max_retries=3):
                         session_id = str(uuid.uuid4())
                         logger.info(f"[DEBUG] Generated new session_id in generate_prompt: {session_id}")
                     
-                    return {"status": "success", "generated_custom_prompt": generated_custom_prompt, "session_id": session_id}
+                    return {
+                        "status": "success",
+                        "generated_custom_prompt": generated_custom_prompt,
+                        "session_id": session_id,
+                        "project_structure": project_structure,
+                    }
                 else:
                     raise KeyError("Expected 'custom_test_prompt' key not found in the response.")
             except json.JSONDecodeError:
@@ -275,7 +307,12 @@ async def generate_prompt(input_data, max_retries=3):
                         session_id = str(uuid.uuid4())
                         logger.info(f"[DEBUG] Generated new session_id in generate_prompt: {session_id}")
                     
-                    return {"status": "success", "generated_custom_prompt": resp.strip(), "session_id": session_id}
+                    return {
+                        "status": "success",
+                        "generated_custom_prompt": resp.strip(),
+                        "session_id": session_id,
+                        "project_structure": project_structure,
+                    }
                 else:
                     raise ValueError("Empty or invalid response received from LLM")
 
@@ -339,6 +376,8 @@ async def run_step(input_data):
         session_id = input_data.get("session_id")
         # Get process_title directly from user input without fallback
         process_title = input_data.get("process_title", "")
+        project_structure = input_data.get("project_structure") or {}
+        project_structure_context = project_structure_prompt_context(project_structure)
         
         logger.info(f"[DEBUG] Input parameters: model={model_name}, files_count={len(files)}, test_type={test_type}, test_category={test_category}")
         logger.info(f"[DEBUG] Final prompt length: {len(final_prompt) if final_prompt else 0}")
@@ -370,8 +409,10 @@ async def run_step(input_data):
                     # File object'ten content okuma
                     if hasattr(file, 'read'):
                         content = file.read()
+                        if inspect.isawaitable(content):
+                            content = await content
                         if isinstance(content, bytes):
-                            content = content.decode('utf-8')
+                            content = content.decode('utf-8', errors='replace')
                         file_name = getattr(file, 'filename', f'file_{processed_files + 1}')
                     else:
                         # String path ise dosyadan oku
@@ -393,6 +434,14 @@ async def run_step(input_data):
         logger.info(f"[DEBUG] Total files processed: {processed_files}, total content length: {len(file_contents)}")        
         # Token sayısını hesapla (tiktoken ile doğru sayım)
         total_token_count = 0
+        execution_context = f"""
+
+{EXECUTION_GROUNDING_RULES}
+
+## PROJECT AST MANIFEST
+{project_structure_context}
+"""
+
         if file_contents.strip():
             total_token_count = count_tokens(file_contents)
             logger.info(f"[DEBUG] Total token count for file contents (tiktoken): {total_token_count}")
@@ -421,6 +470,8 @@ async def run_step(input_data):
 
 {final_prompt}
 
+{execution_context}
+
 ## FILE CONTENTS TO ANALYZE:
 {file_contents}
 
@@ -435,6 +486,13 @@ Respond ONLY with a valid JSON object with this EXACT structure (no other text):
       "Description": "Detailed description of what this test scenario covers and why it's important",
       "Objective": "What this test aims to verify or validate",
       "Category": "{test_category}",
+      "TargetSymbols": ["package.module.Class.method"],
+      "Setup": ["Concrete executable setup step"],
+      "Action": "Concrete call/action using declared symbols",
+      "Oracle": "Observable assertion and expected value/error",
+      "ExpectedBehavior": "pass or expected_rejection",
+      "ExecutionStatus": "executable or unsupported",
+      "UnsupportedReason": "Empty when executable; otherwise the missing API/observable",
       "Comments": "Additional notes, assumptions, or considerations"
     }}
   ],
@@ -452,6 +510,8 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
 
 {final_prompt}
 
+{execution_context}
+
 ## STRICT OUTPUT REQUIREMENTS:
 Respond ONLY with a valid JSON object with this EXACT structure (no other text):
 
@@ -463,6 +523,13 @@ Respond ONLY with a valid JSON object with this EXACT structure (no other text):
       "Description": "Detailed description of what this test scenario covers and why it's important",
       "Objective": "What this test aims to verify or validate",
       "Category": "{test_category}",
+      "TargetSymbols": ["package.module.Class.method"],
+      "Setup": ["Concrete executable setup step"],
+      "Action": "Concrete call/action using declared symbols",
+      "Oracle": "Observable assertion and expected value/error",
+      "ExpectedBehavior": "pass or expected_rejection",
+      "ExecutionStatus": "executable or unsupported",
+      "UnsupportedReason": "Empty when executable; otherwise the missing API/observable",
       "Comments": "Additional notes, assumptions, or considerations"
     }}
   ],
@@ -620,6 +687,13 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
                             "Preconditions": "System is initialized and running",
                             "Steps": "1. Setup system\n2. Execute primary workflow\n3. Verify output",
                             "ExpectedResults": "System behaves as specified in requirements",
+                            "TargetSymbols": [],
+                            "Setup": [],
+                            "Action": "",
+                            "Oracle": "",
+                            "ExpectedBehavior": "pass",
+                            "ExecutionStatus": "unsupported",
+                            "UnsupportedReason": "The model response did not identify a declared executable target.",
                             "Comments": "Auto-generated fallback — LLM response did not contain structured JSON"
                         }]
                     }
@@ -657,6 +731,7 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
                     "session_id": session_id,
                     "output": {
                         "test_scenarios": test_scenarios,
+                        "project_structure": project_structure,
                         "metadata": {
                             "model_used": actual_model_used,
                             "files_processed": processed_files,
@@ -737,6 +812,7 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
             return {
                 "status": "success",
                 "test_scenarios": test_scenarios,
+                "project_structure": project_structure,
                 "metadata": {
                     "model_used": model_name,
                     "files_processed": processed_files,
@@ -823,6 +899,9 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
                             'Title': 'Basic Functional Test',
                             'Description': 'This scenario tests the basic functionality of the system based on the provided requirements and documentation.',
                             'Objective': 'Verify that core system functions work as expected',
+                            'TargetSymbols': [],
+                            'ExecutionStatus': 'unsupported',
+                            'UnsupportedReason': 'Fallback extraction did not establish a declared target symbol and oracle.',
                             'Category': test_category or 'Functional',
                             'Comments': 'Generated from basic fallback extraction'
                         },
@@ -831,6 +910,9 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
                             'Title': 'Input Validation Test',
                             'Description': 'This scenario tests input validation and error handling mechanisms of the system.',
                             'Objective': 'Verify that the system properly validates inputs and handles errors',
+                            'TargetSymbols': [],
+                            'ExecutionStatus': 'unsupported',
+                            'UnsupportedReason': 'Fallback extraction did not establish a declared target symbol and oracle.',
                             'Category': test_category or 'Functional',
                             'Comments': 'Generated from basic fallback extraction'
                         },
@@ -839,6 +921,9 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
                             'Title': 'End-to-End Workflow Test',
                             'Description': 'This scenario tests the complete workflow from start to finish to ensure all components work together.',
                             'Objective': 'Verify that the complete system workflow functions correctly',
+                            'TargetSymbols': [],
+                            'ExecutionStatus': 'unsupported',
+                            'UnsupportedReason': 'Fallback extraction did not establish a declared target symbol and oracle.',
                             'Category': test_category or 'Functional',
                             'Comments': 'Generated from basic fallback extraction'
                         }

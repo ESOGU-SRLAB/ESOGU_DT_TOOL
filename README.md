@@ -945,6 +945,18 @@ to the model atomically. If the selected context exceeds the configured budget,
 generation stops with an explicit error instead of splitting executable Python
 into independent responses and concatenating them.
 
+Scenario, test-case, and test-code generation also support an execution-grounded
+Project AST context. Upload a compact JSON manifest with file type `Project AST`
+and map it to the relevant pipeline steps; if it is omitted, STLC derives the
+same manifest automatically from mapped Python source files. The manifest keeps
+module names, imports, classes, callable signatures, and call relationships
+without sending a verbose raw `ast.dump`. Generated artifacts carry exact target
+symbols, setup/action/oracle information, expected behavior, and an
+`executable`/`unsupported` status. Unsupported cases are not sent to code
+generation. Generated Python is checked against project imports and inferred
+class-method calls; an undeclared project symbol triggers the existing one-shot
+repair prompt and remains ineligible for execution if the repair still fails.
+
 ## Monitoring Integration
 
 STLC publishes consumer-neutral lifecycle telemetry from the existing pipeline

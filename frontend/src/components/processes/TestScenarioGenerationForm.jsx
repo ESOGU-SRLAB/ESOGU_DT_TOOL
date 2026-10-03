@@ -359,6 +359,8 @@ export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, on
       
       // 1. Get file contents from selected files for this process
       const fileContents = [];
+      const sourceFilesForPrompt = [];
+      let projectStructure = null;
       console.log('[DEBUG] Initial data check:', {
         managedFiles: managedFiles?.length || 0,
         selectedFiles: selectedFiles.length,
@@ -387,7 +389,17 @@ export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, on
         // Extract content from selected files
         for (const file of filesToProcess) {
           if (file.content && typeof file.content === 'string' && file.content.trim().length > 0) {
-            fileContents.push(file.content);
+            if (file.type === 'Project AST') {
+              try {
+                projectStructure = JSON.parse(file.content);
+              } catch (parseError) {
+                toast.error(`Invalid Project AST JSON: ${file.name}`);
+                return;
+              }
+            } else {
+              fileContents.push(file.content);
+              sourceFilesForPrompt.push({ name: file.name, content: file.content });
+            }
             console.log('[DEBUG] Added file content:', {
               fileName: file.name,
               fileType: file.type,
@@ -443,6 +455,8 @@ export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, on
         model: effectiveModel,
         testPrompt: testPrompt || 'Generate comprehensive test scenarios for the provided code', // Base test prompt
         fileContents: fileContents, // Include selected file contents array
+        sourceFiles: sourceFilesForPrompt,
+        projectStructure,
         session_id: sessionId, // Use the existing session ID for consistency
         process_title: processTitle, // Use the user-entered process title directly
         api_key: apiKey  // API key eklendi
@@ -539,6 +553,13 @@ You MUST respond with a valid JSON object in this exact structure:
             "Description": "<Detailed scenario description at least 3 sentences. This is the most important part of the generate test scenario!>",
             "Objective": "<Objective or goal of the scenario>",
             "Category": "${testCategory}",
+            "TargetSymbols": ["<exact module.class.method from Project AST>"],
+            "Setup": ["<concrete executable setup>"],
+            "Action": "<concrete call using the declared signature>",
+            "Oracle": "<observable assertion and expected value/error>",
+            "ExpectedBehavior": "pass or expected_rejection",
+            "ExecutionStatus": "executable or unsupported",
+            "UnsupportedReason": "<empty when executable; missing API/observable otherwise>",
             "Comments": "<Any inconsistency or additional notes>"
         }
     ]
@@ -551,6 +572,8 @@ You MUST respond with a valid JSON object in this exact structure:
 - Generate maximum test scenarios covering different aspects
 - Each scenario must have unique ScenarioID (increment the number)
 - Include both positive and negative test cases where appropriate
+- Never invent functions or methods absent from the Project AST/source context
+- Mark an intent unsupported when no declared target and observable oracle exist
 
 ## Example JSON output:
 \`\`\`json
@@ -562,6 +585,13 @@ You MUST respond with a valid JSON object in this exact structure:
             "Description": "Test the login functionality to ensure that users can successfully log in with valid credentials and are rejected with incorrect credentials. Additionally, verify that the system displays appropriate error messages for failed login attempts to guide users in correcting their input. Furthermore, ensure that the login session is maintained correctly, allowing users to access their accounts seamlessly after a successful login.",
             "Objective": "Validate user authentication mechanism.",
             "Category": "${testCategory}",
+            "TargetSymbols": ["<exact symbol from the supplied Project AST>"],
+            "Setup": ["<setup supported by supplied source>"],
+            "Action": "<call a declared symbol with valid inputs>",
+            "Oracle": "<assert a source-declared observable result>",
+            "ExpectedBehavior": "pass",
+            "ExecutionStatus": "executable",
+            "UnsupportedReason": "",
             "Comments": ""
         }
     ]
@@ -651,6 +681,7 @@ Generate the test scenarios now following the exact JSON structure above.`;
 
       // Get selected files for processing
       const selectedFilesData = [];
+      let projectAstFile = null;
       if (managedFiles && selectedFiles.length > 0) {
         const availableFiles = getAvailableFiles();
         const filesToProcess = availableFiles.filter(file => selectedFiles.includes(file.id));
@@ -660,7 +691,11 @@ Generate the test scenarios now following the exact JSON structure above.`;
             // Create a File object from the content
             const blob = new Blob([file.content], { type: 'text/plain' });
             const fileObj = new File([blob], file.name, { type: 'text/plain' });
-            selectedFilesData.push(fileObj);
+            if (file.type === 'Project AST') {
+              projectAstFile = fileObj;
+            } else {
+              selectedFilesData.push(fileObj);
+            }
           }
         }
       }
@@ -691,7 +726,8 @@ Generate the test scenarios now following the exact JSON structure above.`;
           testCategory: testCategory,
           process_title: processTitle, // Use the user-entered process title directly
           sessionId: sessionId, // Use global sessionId directly
-          apiKey: apiKey // Add API key to config
+          apiKey: apiKey, // Add API key to config
+          projectAstFile
         };
 
         console.log('[DEBUG] Calling run function with config:', {
@@ -721,6 +757,9 @@ Generate the test scenarios now following the exact JSON structure above.`;
         selectedFilesData.forEach((file, index) => {
           formData.append('files', file);
         });
+        if (projectAstFile) {
+          formData.append('project_ast_file', projectAstFile, projectAstFile.name);
+        }
 
         const response = await processService.runTestScenarioGeneration(formData);
         
@@ -884,6 +923,9 @@ Generate the test scenarios now following the exact JSON structure above.`;
         {/* Select Input Files Section */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Select Input Files</label>
+          <p className="mb-2 text-xs text-gray-500">
+            Select source code together with an optional <strong>Project AST</strong> manifest. When no manifest is selected, the backend derives one from Python source files.
+          </p>
           {(() => {
             const availableFiles = getAvailableFiles();
             

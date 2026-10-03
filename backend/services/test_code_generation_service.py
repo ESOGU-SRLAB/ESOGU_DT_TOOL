@@ -24,6 +24,11 @@ from services.robot_capability_service import (
     validate_generated_code_against_capabilities,
 )
 from utils.standalone_test_validation import supports_legacy_sim_robot_goal
+from services.project_structure_service import (
+    EXECUTION_GROUNDING_RULES,
+    project_structure_prompt_context,
+    validate_code_against_project_structure,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +216,12 @@ class TestCodeGenerationService:
                             "priority": test_case.get("priority") or test_case.get("Priority", "Medium"),
                             "preconditions": test_case.get("preconditions") or test_case.get("Preconditions", []),
                             "steps": test_case.get("steps") or test_case.get("Steps", []),
-                            "expected_result": test_case.get("expected_result") or test_case.get("ExpectedResult", "")
+                            "expected_result": test_case.get("expected_result") or test_case.get("ExpectedResult", ""),
+                            "target_symbols": test_case.get("target_symbols") or test_case.get("TargetSymbols", []),
+                            "oracle_type": test_case.get("oracle_type") or test_case.get("OracleType", ""),
+                            "expected_behavior": test_case.get("expected_behavior") or test_case.get("ExpectedBehavior", "pass"),
+                            "execution_status": test_case.get("execution_status") or test_case.get("ExecutionStatus", ""),
+                            "unsupported_reason": test_case.get("unsupported_reason") or test_case.get("UnsupportedReason", ""),
                         })
                 
                 # 2. Old format fallback: test_cases (direct array)
@@ -226,7 +236,12 @@ class TestCodeGenerationService:
                             "priority": test_case.get("priority") or test_case.get("Priority", "Medium"),
                             "preconditions": test_case.get("preconditions") or test_case.get("Preconditions", []),
                             "steps": test_case.get("steps") or test_case.get("Steps", []),
-                            "expected_result": test_case.get("expected_result") or test_case.get("ExpectedResult", "")
+                            "expected_result": test_case.get("expected_result") or test_case.get("ExpectedResult", ""),
+                            "target_symbols": test_case.get("target_symbols") or test_case.get("TargetSymbols", []),
+                            "oracle_type": test_case.get("oracle_type") or test_case.get("OracleType", ""),
+                            "expected_behavior": test_case.get("expected_behavior") or test_case.get("ExpectedBehavior", "pass"),
+                            "execution_status": test_case.get("execution_status") or test_case.get("ExecutionStatus", ""),
+                            "unsupported_reason": test_case.get("unsupported_reason") or test_case.get("UnsupportedReason", ""),
                         })
                 
                 logger.info(f"Found {len(unique_cases)} test cases for process '{process_title}' from test_case_generation")
@@ -357,6 +372,7 @@ class TestCodeGenerationService:
                                 api_key: str = None,
                                 max_test_cases: int = None,
                                 capability_contract: Dict[str, Any] = None,
+                                project_structure: Dict[str, Any] = None,
                                 max_input_tokens: int = 64000) -> Dict[str, Any]:
         """
         Ana test code generation fonksiyonu
@@ -445,6 +461,18 @@ class TestCodeGenerationService:
             for i, test_case in enumerate(unique_test_cases):
                 try:
                     logger.info(f"🔄 Generating test code {i+1}/{total_cases}")
+
+                    if str(test_case.get("execution_status", "")).lower() == "unsupported":
+                        generated_tests.append({
+                            "test_case_id": test_case.get("test_case_id") or test_case.get("TestCaseID", f"TC_{i+1}"),
+                            "title": test_case.get("title") or test_case.get("Title", "Unsupported Test"),
+                            "status": "unsupported",
+                            "execution_eligibility": "unsupported",
+                            "eligibility_reason": test_case.get("unsupported_reason") or "The upstream test case is not executable against the declared project API.",
+                            "code": None,
+                            "repair_attempted": False,
+                        })
+                        continue
                     
                     # Gemini API için retry mekanizması
                     max_retries = 3 if is_gemini else 1
@@ -461,6 +489,7 @@ class TestCodeGenerationService:
                                 i + 1,
                                 custom_prompt,
                                 capability_contract,
+                                project_structure,
                                 max_input_tokens,
                             )
                             if test_code:
@@ -544,6 +573,7 @@ class TestCodeGenerationService:
                     capability_descriptor(capability_contract)
                     if capability_contract else None
                 ),
+                "project_structure": project_structure,
                 "max_input_tokens": max_input_tokens,
                 "timestamp": datetime.now().isoformat()
             }
@@ -565,6 +595,7 @@ class TestCodeGenerationService:
                                        test_number: int,
                                        custom_prompt: str = None,
                                        capability_contract: Dict[str, Any] = None,
+                                       project_structure: Dict[str, Any] = None,
                                        max_input_tokens: int = 64000) -> Dict[str, Any]:
         """
         Tek bir test case için test kodu üretir
@@ -620,6 +651,7 @@ class TestCodeGenerationService:
                 template,
                 custom_prompt,
                 capability_contract,
+                project_structure,
             )
             input_tokens = count_tokens(prompt)
             if input_tokens > max_input_tokens:
@@ -708,6 +740,16 @@ class TestCodeGenerationService:
                 validate_generated_code_against_capabilities(test_code, capability_contract)
                 if capability_contract else []
             )
+            project_issues = validate_code_against_project_structure(test_code, project_structure)
+            if project_issues:
+                oracle_report["issues"].extend(project_issues)
+                oracle_report["checks"].append({
+                    "name": "project_ast_contract",
+                    "passed": False,
+                    "details": " ".join(project_issues),
+                })
+                oracle_report["passed"] = False
+                oracle_report["verdict"] = "fail"
             if capability_issues:
                 oracle_report["issues"].extend(capability_issues)
                 oracle_report["checks"].append({
@@ -794,6 +836,16 @@ Return only the corrected executable code or CAPABILITY_UNSUPPORTED.
                     validate_generated_code_against_capabilities(test_code, capability_contract)
                     if capability_contract else []
                 )
+                project_issues = validate_code_against_project_structure(test_code, project_structure)
+                if project_issues:
+                    oracle_report["issues"].extend(project_issues)
+                    oracle_report["checks"].append({
+                        "name": "project_ast_contract",
+                        "passed": False,
+                        "details": " ".join(project_issues),
+                    })
+                    oracle_report["passed"] = False
+                    oracle_report["verdict"] = "fail"
                 if capability_issues:
                     oracle_report["issues"].extend(capability_issues)
                     oracle_report["checks"].append({
@@ -859,7 +911,8 @@ Return only the corrected executable code or CAPABILITY_UNSUPPORTED.
                                      environment_info: Dict[str, Any], 
                                      template: Dict[str, Any],
                                      custom_prompt: str = None,
-                                     capability_contract: Dict[str, Any] = None) -> str:
+                                     capability_contract: Dict[str, Any] = None,
+                                     project_structure: Dict[str, Any] = None) -> str:
         """
         Test code generation için LLM prompt'u oluşturur
         """
@@ -929,6 +982,11 @@ invent a symbol that is absent from both this context and the approved robot
 capability contract.
 
 {source_context}
+
+{EXECUTION_GROUNDING_RULES}
+
+## PROJECT AST MANIFEST (AUTHORITATIVE PROJECT SYMBOLS):
+{project_structure_prompt_context(project_structure)}
 
 ## TEST FRAMEWORK & ENVIRONMENT:
 **Framework**: {framework}

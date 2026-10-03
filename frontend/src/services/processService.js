@@ -428,6 +428,9 @@ export const processService = {
     if (data.sessionId) formData.append('session_id', data.sessionId);
     if (data.process_title) formData.append('process_title', data.process_title);
     if (data.apiKey) formData.append('api_key', data.apiKey);
+    if (data.projectAstFile) {
+      formData.append('project_ast_file', data.projectAstFile, data.projectAstFile.name);
+    }
 
     try {
       console.log('[ProcessService] Running test scenario generation with final prompt');

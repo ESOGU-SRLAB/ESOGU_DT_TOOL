@@ -5,6 +5,7 @@ import { clsx } from 'clsx';
 const FILE_TYPES = [
   'Requirement Document',
   'Source Code',
+  'Project AST',
   'UML',
 ];
 

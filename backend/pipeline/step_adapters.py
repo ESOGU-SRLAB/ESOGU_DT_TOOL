@@ -288,10 +288,27 @@ async def run_test_scenario_generation(
         from stlc.test_scenario_generation import generate_prompt, run_step
         from core.database import get_database
         from utils.text_splitter import count_tokens
+        from services.project_structure_service import (
+            build_project_structure,
+            is_project_structure_file,
+            parse_project_structure,
+        )
 
         cfg = _get_step_config(req, step_id)
         files = _files_for_step(req, step_id)
-        upload_files = await _make_upload_files(files)
+        manifest_file = next(
+            (item for item in files if is_project_structure_file(item.name, item.type)),
+            None,
+        )
+        source_files = [item for item in files if item is not manifest_file]
+        project_structure = (
+            parse_project_structure(manifest_file.content or "", manifest_file.name)
+            if manifest_file
+            else build_project_structure([
+                {"name": item.name, "content": item.content or ""}
+                for item in source_files
+            ])
+        )
 
         model = cfg.get("model", "qwen2.5-7b-instruct-1m")
         api_key = cfg.get("api_key")
@@ -300,7 +317,7 @@ async def run_test_scenario_generation(
         process_title = cfg.get("process_title") or req.process_title or "Pipeline Process"
 
         # Build file contents list for generate_prompt
-        file_contents = [fi.content for fi in files if fi.content]
+        file_contents = [fi.content for fi in source_files if fi.content]
 
         # 1. Generate the prompt
         prompt_input = {
@@ -309,6 +326,11 @@ async def run_test_scenario_generation(
             "model": model,
             "testPrompt": cfg.get("custom_prompt") or "",
             "fileContents": file_contents,
+            "sourceFiles": [
+                {"name": item.name, "content": item.content or ""}
+                for item in source_files
+            ],
+            "projectStructure": project_structure,
             "process_title": process_title,
             "session_id": req.session_id,
             "api_key": api_key,
@@ -324,7 +346,7 @@ async def run_test_scenario_generation(
         # Truncate very large files to ~6000 chars to avoid context overflow.
         MAX_FILE_CHARS = 6000
         combined_file_contents = ""
-        for fi in files:
+        for fi in source_files:
             if fi.content:
                 content = fi.content
                 if len(content) > MAX_FILE_CHARS:
@@ -348,6 +370,7 @@ async def run_test_scenario_generation(
             "session_id": req.session_id,
             "process_title": process_title,
             "api_key": api_key,
+            "project_structure": project_structure,
         }
         result = await run_step(run_data)
         if result.get("status") == "error":
@@ -404,6 +427,13 @@ async def run_test_case_generation(
                 "description": item.get("description") or item.get("Description", ""),
                 "objective": item.get("objective") or item.get("Objective", ""),
                 "category": item.get("category") or item.get("Category", ""),
+                "target_symbols": item.get("target_symbols") or item.get("TargetSymbols", []),
+                "setup": item.get("setup") or item.get("Setup", []),
+                "action": item.get("action") or item.get("Action", ""),
+                "oracle": item.get("oracle") or item.get("Oracle", ""),
+                "expected_behavior": item.get("expected_behavior") or item.get("ExpectedBehavior", "pass"),
+                "execution_status": item.get("execution_status") or item.get("ExecutionStatus", ""),
+                "unsupported_reason": item.get("unsupported_reason") or item.get("UnsupportedReason", ""),
             }
             for item in scenarios
         ]
@@ -414,9 +444,13 @@ async def run_test_case_generation(
             "selected_scenarios": normalized_scenarios,
             "process_prompt": cfg.get("custom_prompt") or "",
             "selected_files": [
-                {"name": file_info.name, "content": file_info.content}
+                {"name": file_info.name, "content": file_info.content, "type": file_info.type}
                 for file_info in files
             ],
+            "project_structure": (
+                previous.output.get("project_structure", {})
+                if previous and previous.output else {}
+            ),
             "ai_model": cfg.get("model"),
             "session_id": req.session_id,
             "selected_process_title": (
@@ -543,6 +577,11 @@ async def run_test_code_generation(
     try:
         from services.test_code_generation_service import TestCodeGenerationService
         from services.robot_capability_service import parse_robot_capability_json
+        from services.project_structure_service import (
+            build_project_structure,
+            is_project_structure_file,
+            parse_project_structure,
+        )
 
         cfg = _get_step_config(req, step_id)
         model = cfg.get("model", "qwen2.5-7b-instruct-1m")
@@ -571,7 +610,18 @@ async def run_test_code_generation(
             ),
             None,
         )
-        source_files = [item for item in files if item is not capability_file]
+        project_ast_file = next(
+            (
+                item for item in files
+                if item is not capability_file
+                and is_project_structure_file(item.name, item.type)
+            ),
+            None,
+        )
+        source_files = [
+            item for item in files
+            if item is not capability_file and item is not project_ast_file
+        ]
         upload_files = await _make_upload_files(source_files)
         capability_contract = (
             parse_robot_capability_json(
@@ -579,6 +629,14 @@ async def run_test_code_generation(
                 capability_file.name,
             )
             if capability_file else None
+        )
+        project_structure = (
+            parse_project_structure(project_ast_file.content or "", project_ast_file.name)
+            if project_ast_file
+            else build_project_structure([
+                {"name": item.name, "content": item.content or ""}
+                for item in source_files
+            ])
         )
 
         service = TestCodeGenerationService()
@@ -594,6 +652,7 @@ async def run_test_code_generation(
             api_key=api_key,
             max_test_cases=max_test_cases,
             capability_contract=capability_contract,
+            project_structure=project_structure,
             max_input_tokens=max_input_tokens,
         )
         if not result.get("success", False):

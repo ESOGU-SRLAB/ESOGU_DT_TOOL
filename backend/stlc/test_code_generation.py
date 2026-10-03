@@ -17,6 +17,12 @@ from typing import Optional, List
 from utils.text_splitter import count_tokens
 from services.robot_capability_service import capability_prompt_context
 from core.settings import get_settings
+from services.project_structure_service import (
+    ProjectStructureError,
+    build_project_structure,
+    parse_project_structure,
+    project_structure_prompt_context,
+)
 
 router = APIRouter()
 logger = logging.getLogger("test_code_generation")
@@ -59,6 +65,29 @@ async def _load_capability_contract(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+async def _load_project_structure(
+    project_ast_file: Optional[UploadFile],
+    source_files: List[UploadFile],
+):
+    try:
+        if project_ast_file is not None:
+            return parse_project_structure(
+                await project_ast_file.read(),
+                project_ast_file.filename or "project_ast.json",
+            )
+        source_items = []
+        for upload in source_files:
+            raw = await upload.read()
+            await upload.seek(0)
+            source_items.append({
+                "name": upload.filename or "unknown",
+                "content": raw.decode("utf-8", errors="replace"),
+            })
+        return build_project_structure(source_items)
+    except ProjectStructureError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/token-estimate")
 async def estimate_test_code_generation_tokens(
     process_title: str = Form(...),
@@ -66,6 +95,7 @@ async def estimate_test_code_generation_tokens(
     files: List[UploadFile] = File(...),
     custom_prompt: Optional[str] = Form(None),
     capability_file: Optional[UploadFile] = File(None),
+    project_ast_file: Optional[UploadFile] = File(None),
     max_input_tokens: int = Form(64000),
 ):
     """Estimate the exact per-test prompt size before starting generation."""
@@ -73,6 +103,7 @@ async def estimate_test_code_generation_tokens(
         raise HTTPException(status_code=400, detail="max_input_tokens must be between 4096 and 64000")
     service = _service()
     capability_contract = await _load_capability_contract(capability_file)
+    project_structure = await _load_project_structure(project_ast_file, files)
     test_cases = service.get_unique_test_cases_by_process_title(process_title)
     if not test_cases:
         raise HTTPException(status_code=404, detail="No test cases found for the selected process")
@@ -126,6 +157,7 @@ async def estimate_test_code_generation_tokens(
             template,
             custom_prompt,
             capability_contract,
+            project_structure,
         )
         per_case.append({
             "test_case_id": test_case_info["id"],
@@ -144,6 +176,7 @@ async def estimate_test_code_generation_tokens(
         "robot_capabilities": count_tokens(
             capability_prompt_context(capability_contract) if capability_contract else ""
         ),
+        "project_ast": count_tokens(project_structure_prompt_context(project_structure)),
     }
     return {
         "success": True,
@@ -261,6 +294,7 @@ async def process_test_code_generation(
     api_key: Optional[str] = Form(None),
     max_test_cases: Optional[int] = Form(None),
     capability_file: Optional[UploadFile] = File(None),
+    project_ast_file: Optional[UploadFile] = File(None),
     max_input_tokens: int = Form(64000),
 ):
     """
@@ -296,6 +330,7 @@ async def process_test_code_generation(
             logger.info(f"API key preview: {api_key[:15]}...")
         
         capability_contract = await _load_capability_contract(capability_file)
+        project_structure = await _load_project_structure(project_ast_file, files)
         result = await _service().generate_test_codes(
             process_title=process_title,
             environment_session_id=environment_session_id,
@@ -308,6 +343,7 @@ async def process_test_code_generation(
             api_key=api_key,
             max_test_cases=max_test_cases,
             capability_contract=capability_contract,
+            project_structure=project_structure,
             max_input_tokens=max_input_tokens,
         )
         
@@ -332,6 +368,7 @@ async def generate_test_code(
     custom_prompt: Optional[str] = Form(None),
     max_test_cases: Optional[int] = Form(None),
     capability_file: Optional[UploadFile] = File(None),
+    project_ast_file: Optional[UploadFile] = File(None),
     max_input_tokens: int = Form(64000),
 ):
     """
@@ -364,6 +401,7 @@ async def generate_test_code(
         logger.info(f"Session ID: {session_id}")
         
         capability_contract = await _load_capability_contract(capability_file)
+        project_structure = await _load_project_structure(project_ast_file, files)
         result = await _service().generate_test_codes(
             process_title=process_title,
             environment_session_id=environment_session_id,
@@ -376,6 +414,7 @@ async def generate_test_code(
             custom_prompt=custom_prompt,
             max_test_cases=max_test_cases,
             capability_contract=capability_contract,
+            project_structure=project_structure,
             max_input_tokens=max_input_tokens,
         )
         

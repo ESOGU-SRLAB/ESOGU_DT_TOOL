@@ -37,6 +37,8 @@ export default function PipelineFileSelector({
     switch (fileType) {
       case 'Source Code':
         return <CodeBracketIcon className="h-5 w-5 text-blue-500" />;
+      case 'Project AST':
+        return <CodeBracketIcon className="h-5 w-5 text-purple-500" />;
       case 'Requirement Document':
         return <DocumentTextIcon className="h-5 w-5 text-green-500" />;
       default:

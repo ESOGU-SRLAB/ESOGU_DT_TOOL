@@ -204,7 +204,10 @@ const TestCodeGeneration = ({
       fileProcessMappings[f.id]?.includes('test-code-generation')
     );
 
-    if (selectedFiles.length === 0) {
+    const sourceFiles = selectedFiles.filter(file => file.type !== 'Project AST');
+    const projectAstFile = selectedFiles.find(file => file.type === 'Project AST') || null;
+
+    if (sourceFiles.length === 0) {
       toast.error('Please select at least one source file');
       return null;
     }
@@ -235,7 +238,8 @@ const TestCodeGeneration = ({
       environment_session_id: selectedEnvironmentId,
       process_title: selectedProcessTitle,
       model: model,
-      selected_files: selectedFiles,
+      selected_files: sourceFiles,
+      project_ast_file: projectAstFile,
       environment_name: environmentName,
       sessionId: sessionId, // Add session ID from props
       prompt: effectivePrompt,
@@ -279,10 +283,14 @@ const TestCodeGeneration = ({
       estimateForm.append('custom_prompt', effectivePrompt || '');
       estimateForm.append('max_input_tokens', String(maxInputTokens));
       selectedFiles.forEach((selectedFile) => {
-        if (selectedFile?.file) {
+        if (selectedFile?.file && selectedFile.type !== 'Project AST') {
           estimateForm.append('files', selectedFile.file, selectedFile.name);
         }
       });
+      const mappedProjectAst = selectedFiles.find(file => file.type === 'Project AST');
+      if (mappedProjectAst?.file) {
+        estimateForm.append('project_ast_file', mappedProjectAst.file, mappedProjectAst.name);
+      }
       if (capabilityFile) {
         estimateForm.append('capability_file', capabilityFile, capabilityFile.name);
       }
@@ -350,6 +358,13 @@ const TestCodeGeneration = ({
 
         if (capabilityFile) {
           formData.append('capability_file', capabilityFile, capabilityFile.name);
+        }
+        if (formDataObj.project_ast_file?.file) {
+          formData.append(
+            'project_ast_file',
+            formDataObj.project_ast_file.file,
+            formDataObj.project_ast_file.name
+          );
         }
         
         // Add API key if available - get from Redux store based on selected model
@@ -573,6 +588,13 @@ const TestCodeGeneration = ({
         </div>
 
         {/* Robot Capability Contract */}
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h2 className="text-lg font-semibold mb-2">Project AST Context</h2>
+          <p className="text-sm text-gray-600">
+            Upload a compact AST manifest from the Files tab with type <strong>Project AST</strong> and map it to this step. If omitted, the backend derives the manifest automatically from mapped Python source files.
+          </p>
+        </div>
+
         <div className="bg-white p-4 rounded-lg shadow">
           <h2 className="text-lg font-semibold mb-4">Robot Capability Contract</h2>
           <label className="block text-sm font-medium text-gray-700 mb-2">
