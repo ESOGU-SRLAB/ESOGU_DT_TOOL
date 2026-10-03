@@ -31,7 +31,7 @@ export default function TestCaseGenerationForm({ onRun, process, sessionId }) {
       setIsLoading(true);
       setError(null);
       
-      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/process-titles');
+      const response = await fetch('/api/processes/test-scenario-generation/process-titles');
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -60,7 +60,7 @@ export default function TestCaseGenerationForm({ onRun, process, sessionId }) {
       setIsLoading(true);
       setError(null);
       
-      const response = await fetch(`http://localhost:8000/api/processes/test-scenario-generation/process-data/${sessionId}`);
+      const response = await fetch(`/api/processes/test-scenario-generation/process-data/${sessionId}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

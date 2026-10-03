@@ -542,6 +542,7 @@ async def run_test_code_generation(
     t0 = time.time()
     try:
         from services.test_code_generation_service import TestCodeGenerationService
+        from services.robot_capability_service import parse_robot_capability_json
 
         cfg = _get_step_config(req, step_id)
         model = cfg.get("model", "qwen2.5-7b-instruct-1m")
@@ -550,6 +551,7 @@ async def run_test_code_generation(
         environment_name = cfg.get("environment_name") or process_title
         output_format = cfg.get("output_format", "json")
         max_test_cases = cfg.get("max_test_cases")
+        max_input_tokens = cfg.get("max_input_tokens", 64000)
 
         # --- Determine environment session_id ---
         environment_session_id = cfg.get("environment_session_id") or req.session_id
@@ -561,7 +563,23 @@ async def run_test_code_generation(
 
         # --- Build UploadFile list for source files ---
         files = _files_for_step(req, step_id) or _files_for_step(req, "environment-setup")
-        upload_files = await _make_upload_files(files)
+        capability_file = next(
+            (
+                item for item in files
+                if item.name.lower() == "robot_capabilities.json"
+                or item.name.lower().endswith(".capabilities.json")
+            ),
+            None,
+        )
+        source_files = [item for item in files if item is not capability_file]
+        upload_files = await _make_upload_files(source_files)
+        capability_contract = (
+            parse_robot_capability_json(
+                (capability_file.content or "").encode("utf-8"),
+                capability_file.name,
+            )
+            if capability_file else None
+        )
 
         service = TestCodeGenerationService()
         result = await service.generate_test_codes(
@@ -575,6 +593,8 @@ async def run_test_code_generation(
             output_format=output_format,
             api_key=api_key,
             max_test_cases=max_test_cases,
+            capability_contract=capability_contract,
+            max_input_tokens=max_input_tokens,
         )
         if not result.get("success", False):
             return _err(step_id, result.get("error", "Test code generation failed"), t0)
@@ -599,7 +619,7 @@ async def run_test_execution(
         import os
 
         cfg = _get_step_config(req, step_id)
-        execution_method = cfg.get("execution_method", "ai")  # "ai" | "docker" | "robot"
+        execution_method = cfg.get("execution_method", "ai")
 
         logger.info(f"[Pipeline][{step_id}] execution_method={execution_method}")
 
@@ -620,7 +640,52 @@ async def run_test_execution(
         # Route to the appropriate execution engine
         # ----------------------------------------------------------------
 
-        if execution_method == "ros2":
+        if execution_method == "ssh_docker":
+            # ---- Remote ROS2 harness via SCP + SSH + Docker ----
+            from services.execution_client import ExecutionRequest, SshDockerExecutionClient
+
+            client = SshDockerExecutionClient()
+            if not client.is_configured:
+                return _err(
+                    step_id,
+                    "SSH Docker execution is not configured. Set SSH_EXECUTION_HOST.",
+                    t0,
+                )
+
+            remote_timeout = cfg.get("remote_timeout") or 300
+            execution_results = []
+            for test_item in generated_tests:
+                code = test_item.get("code") or test_item.get("test_code", "")
+                if not code:
+                    continue
+                test_id = test_item.get("test_case_id", test_item.get("id", "unknown"))
+                try:
+                    result = await client.submit(ExecutionRequest(
+                        test_code=code,
+                        language="python",
+                        test_case_id=str(test_id),
+                        session_id=req.session_id,
+                        process_title=cfg.get("process_title") or req.process_title,
+                        metadata={"source": "stlc_pipeline"},
+                        configuration={"timeout_seconds": remote_timeout},
+                    ))
+                    succeeded = result.status == "completed" and result.failed == 0
+                    execution_results.append({
+                        "test_id": test_id,
+                        "status": "success" if succeeded else "error",
+                        "output": result.logs or "",
+                        "error": result.error,
+                        "execution_id": result.execution_id,
+                        "artifacts": result.artifacts,
+                    })
+                except Exception as exc:
+                    execution_results.append({
+                        "test_id": test_id,
+                        "status": "error",
+                        "error": str(exc),
+                    })
+
+        elif execution_method == "ros2":
             # ---- ROS2 Docker Execution ----
             from services.ros2_executor import ros2_executor
             if not ros2_executor.is_ros2_available():

@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from services.remote_execution_service import RemoteExecutionService
+from services.execution_client import ExecutionRequest, SshDockerExecutionClient
+from utils.standalone_test_validation import supports_legacy_sim_robot_goal
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -115,9 +117,159 @@ class ListFoldersResponse(BaseModel):
     error: Optional[str] = None
 
 
+class RemoteTestFile(BaseModel):
+    test_id: str = Field(..., min_length=1)
+    filename: Optional[str] = None
+    content: str = Field(..., min_length=1)
+    execution_eligibility: str = "eligible"
+    eligibility_reason: Optional[str] = None
+    oracle: Optional[Dict[str, Any]] = None
+
+
+class ExecuteRemoteTestsRequest(BaseModel):
+    session_id: Optional[str] = None
+    process_name: Optional[str] = None
+    timeout_seconds: int = Field(300, ge=10, le=1900)
+    test_files: List[RemoteTestFile] = Field(..., min_length=1)
+
+
 # ============================================================================
 # API Endpoints
 # ============================================================================
+
+@router.get("/runner-status")
+async def get_remote_runner_status():
+    """Return non-sensitive SSH/Docker runner configuration status."""
+    try:
+        client = SshDockerExecutionClient()
+        return {
+            "success": True,
+            "configured": client.is_configured,
+            "host": client.host,
+            "remote_dir": client.remote_dir,
+            "image": client.image,
+            "authentication": "password" if client.password else "ssh_key",
+            "legacy_sim_robot_goal_supported": supports_legacy_sim_robot_goal(client.image),
+        }
+    except Exception as exc:
+        return {"success": False, "configured": False, "error": str(exc)}
+
+
+@router.post("/execute-tests")
+async def execute_remote_tests(request: ExecuteRemoteTestsRequest):
+    """Upload selected Python tests and execute each in the remote ROS 2 harness."""
+    client = SshDockerExecutionClient()
+    if not client.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Remote execution is not configured. Set SSH_EXECUTION_HOST.",
+        )
+
+    results = []
+    for item in request.test_files:
+        oracle_failed = item.oracle is not None and item.oracle.get("passed") is False
+        if item.execution_eligibility != "eligible" or oracle_failed:
+            reason = (
+                item.eligibility_reason
+                or "Generation oracle rejected this test; remote execution was not started."
+            )
+            results.append({
+                "test_id": item.test_id,
+                "filename": item.filename,
+                "status": "not_executed",
+                "verdict": "invalid",
+                "passed": 0,
+                "failed": 0,
+                "errors": 0,
+                "blocked": 0,
+                "not_executed": 1,
+                "logs": "",
+                "error": reason,
+                "exit_code": None,
+                "reset_status": None,
+                "artifacts": [],
+            })
+            continue
+        try:
+            result = await client.submit(ExecutionRequest(
+                test_code=item.content,
+                language="python",
+                framework="pytest",
+                test_case_id=item.test_id,
+                session_id=request.session_id,
+                process_title=request.process_name,
+                metadata={"filename": item.filename, "source": "test_execution_remote"},
+                configuration={"timeout_seconds": request.timeout_seconds},
+            ))
+            results.append({
+                "test_id": item.test_id,
+                "filename": item.filename,
+                "execution_id": result.execution_id,
+                "status": result.status,
+                "verdict": result.verdict,
+                "passed": result.passed,
+                "failed": result.failed,
+                "errors": result.errors,
+                "blocked": result.blocked,
+                "not_executed": result.not_executed,
+                "logs": result.logs,
+                "error": result.error,
+                "exit_code": result.exit_code,
+                "reset_status": result.reset_status,
+                "artifacts": result.artifacts,
+                "started_at": result.started_at,
+                "finished_at": result.finished_at,
+            })
+        except Exception as exc:
+            logger.error(
+                "Remote test %s failed: %s: %s",
+                item.test_id,
+                type(exc).__name__,
+                str(exc)[:1000],
+            )
+            results.append({
+                "test_id": item.test_id,
+                "filename": item.filename,
+                "status": "error",
+                "verdict": "error",
+                "passed": 0,
+                "failed": 0,
+                "errors": 1,
+                "blocked": 0,
+                "not_executed": 0,
+                "logs": "",
+                "error": str(exc)[:1000],
+                "exit_code": None,
+                "reset_status": None,
+                "artifacts": [],
+            })
+
+    def result_verdict(item: Dict[str, Any]) -> str:
+        if item.get("verdict"):
+            return item["verdict"]
+        if item.get("failed", 0) > 0:
+            return "failed"
+        if item.get("status") == "completed":
+            return "passed"
+        return "error"
+
+    verdicts = [result_verdict(item) for item in results]
+    summary = {
+        "total": len(results),
+        "passed": verdicts.count("passed"),
+        "failed": verdicts.count("failed"),
+        "error": verdicts.count("error"),
+        "blocked": verdicts.count("blocked"),
+        "not_executed": verdicts.count("not_executed"),
+        "invalid": verdicts.count("invalid"),
+    }
+    return {
+        "success": summary["passed"] == summary["total"],
+        "session_id": request.session_id,
+        "process_name": request.process_name,
+        "summary": summary,
+        "results": results,
+    }
 
 @router.post("/create-folder", response_model=CreateFolderResponse)
 async def create_execution_folder(request: CreateFolderRequest):

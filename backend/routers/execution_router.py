@@ -183,6 +183,10 @@ class IndividualTest(BaseModel):
     full_code: str
     test_name: Optional[str] = None  # Test name if available
     source_code: Optional[str] = None  # Source code context for the test
+    oracle: Optional[Dict[str, Any]] = None
+    generation_status: str = "success"
+    execution_eligibility: str = "eligible"
+    eligibility_reason: Optional[str] = None
 
 class TestCodeRecord(BaseModel):
     id: str
@@ -948,15 +952,42 @@ async def fetch_individual_tests(process_name: str) -> List[IndividualTest]:
                 # Path 2: In data.generated_tests
                 elif "data" in output and "generated_tests" in output["data"]:
                     generated_tests = output["data"]["generated_tests"]
+                capability_was_used = bool(
+                    output.get("capability_contract")
+                    or (isinstance(output.get("data"), dict) and output["data"].get("capability_contract"))
+                )
                 
                 if generated_tests and isinstance(generated_tests, list):
                     for idx, test in enumerate(generated_tests):
                         if isinstance(test, dict):
-                            test_code = test.get("code", "")
-                            test_name = test.get("name", f"Test {idx + 1}")
+                            # Failed generation records intentionally store code=None.
+                            # Treat them as non-runnable and continue collecting the
+                            # remaining successful tests from the same batch.
+                            test_code = test.get("code") or ""
+                            test_name = test.get("name") or test.get("title", f"Test {idx + 1}")
+                            oracle = test.get("oracle")
+                            generation_status = test.get("status", "success")
+                            execution_eligibility = test.get("execution_eligibility")
+                            if not execution_eligibility:
+                                execution_eligibility = (
+                                    "invalid" if oracle and oracle.get("passed") is False
+                                    else "legacy_unvalidated" if capability_was_used
+                                    else "eligible" if generation_status == "success"
+                                    else generation_status
+                                )
+                            eligibility_reason = test.get("eligibility_reason") or test.get("error")
+                            if execution_eligibility == "legacy_unvalidated" and not eligibility_reason:
+                                eligibility_reason = (
+                                    "This capability-based test predates semantic eligibility validation; "
+                                    "regenerate it before execution."
+                                )
                         else:
                             test_code = str(test)
                             test_name = f"Test {idx + 1}"
+                            oracle = None
+                            generation_status = "success"
+                            execution_eligibility = "eligible"
+                            eligibility_reason = None
                         
                         if test_code.strip():
                             test_id = f"{session_id}_{idx}"
@@ -969,7 +1000,11 @@ async def fetch_individual_tests(process_name: str) -> List[IndividualTest]:
                                 code_snippet=code_snippet,
                                 full_code=test_code,
                                 test_name=test_name,
-                                source_code=source_code  # Add source code context
+                                source_code=source_code,  # Add source code context
+                                oracle=oracle,
+                                generation_status=generation_status,
+                                execution_eligibility=execution_eligibility,
+                                eligibility_reason=eligibility_reason,
                             ))
                             
             except Exception as e:
@@ -1187,6 +1222,10 @@ async def fetch_single_test_code(test_id: str) -> Dict[str, Any]:
         # Path 2: In data.generated_tests
         elif "data" in output and "generated_tests" in output["data"]:
             generated_tests = output["data"]["generated_tests"]
+        capability_was_used = bool(
+            output.get("capability_contract")
+            or (isinstance(output.get("data"), dict) and output["data"].get("capability_contract"))
+        )
         
         if not generated_tests or not isinstance(generated_tests, list) or test_index >= len(generated_tests):
             raise ValueError(f"Test not found at index {test_index}")
@@ -1194,11 +1233,30 @@ async def fetch_single_test_code(test_id: str) -> Dict[str, Any]:
         test = generated_tests[test_index]
         
         if isinstance(test, dict):
-            test_code = test.get("code", "")
+            test_code = test.get("code") or ""
             test_name = test.get("name", f"Test {test_index + 1}")
+            generation_status = test.get("status", "success")
+            oracle = test.get("oracle")
+            execution_eligibility = test.get("execution_eligibility")
+            if not execution_eligibility:
+                execution_eligibility = (
+                    "invalid" if oracle and oracle.get("passed") is False
+                    else "legacy_unvalidated" if capability_was_used
+                    else "eligible" if generation_status == "success"
+                    else generation_status
+                )
+            eligibility_reason = test.get("eligibility_reason") or test.get("error")
+            if execution_eligibility == "legacy_unvalidated" and not eligibility_reason:
+                eligibility_reason = (
+                    "This capability-based test predates semantic eligibility validation; "
+                    "regenerate it before execution."
+                )
         else:
             test_code = str(test)
             test_name = f"Test {test_index + 1}"
+            generation_status = "success"
+            execution_eligibility = "eligible"
+            eligibility_reason = None
         
         if not test_code.strip():
             raise ValueError("Test code is empty")
@@ -1209,7 +1267,10 @@ async def fetch_single_test_code(test_id: str) -> Dict[str, Any]:
             "code": test_code,
             "source_code": source_code,  # ADDED: Source code for context
             "session_id": session_id,
-            "test_index": test_index
+            "test_index": test_index,
+            "generation_status": generation_status,
+            "execution_eligibility": execution_eligibility,
+            "eligibility_reason": eligibility_reason,
         }
         
     except Exception as e:
@@ -1256,6 +1317,12 @@ async def execute_selected_tests(request: SelectedTestsExecutionRequest) -> Test
                 
                 logger.info(f"[execute_selected_tests] Test data fetched: {test_data['test_name']}")
                 logger.info(f"[execute_selected_tests] Source code available: {bool(test_data.get('source_code'))}")
+
+                if test_data.get("execution_eligibility", "eligible") != "eligible":
+                    raise ValueError(
+                        "Test is not eligible for execution: "
+                        + (test_data.get("eligibility_reason") or test_data["execution_eligibility"])
+                    )
                 
                 # Execute single test with source code context
                 mcp_result = await call_mcp_server(

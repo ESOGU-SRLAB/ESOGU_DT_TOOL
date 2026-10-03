@@ -168,7 +168,7 @@ export default function TestReportingForm({
   useEffect(() => {
     const loadProcessPrompt = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/prompts/test-reporting');
+        const response = await fetch('/api/prompts/test-reporting');
         if (response.ok) {
           const data = await response.json();
           setProcessPrompt(data.prompt_text || '');
@@ -186,7 +186,7 @@ export default function TestReportingForm({
   const fetchSessions = useCallback(async () => {
     setIsLoadingSessions(true);
     try {
-      const response = await fetch('http://localhost:8000/api/test-reporting/sessions', {
+      const response = await fetch('/api/test-reporting/sessions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -334,7 +334,7 @@ export default function TestReportingForm({
 
     setIsLoadingPrompt(true);
     try {
-      const response = await fetch('http://localhost:8000/api/test-reporting/preview-prompt', {
+      const response = await fetch('/api/test-reporting/preview-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -433,7 +433,7 @@ This may take a few moments depending on the amount of data and selected analysi
       console.log('[TestReporting] API key provided:', apiKey ? 'Yes' : 'No');
       console.log('[TestReporting] Custom prompt:', customPrompt ? 'Yes' : 'No');
 
-      const response = await fetch('http://localhost:8000/api/test-reporting/generate-report', {
+      const response = await fetch('/api/test-reporting/generate-report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -535,7 +535,7 @@ ${result.error || 'Unknown error occurred'}
 ${error.message}
 
 Please ensure the backend services are running:
-- Main Backend: http://localhost:8000
+- Main Backend: /api via Vite proxy (http://localhost:8100)
 - LM Studio (if using local models): http://localhost:1234
 
 **Check:**

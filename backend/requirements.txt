@@ -21,3 +21,4 @@ aiohttp
 motor
 docker
 tiktoken
+paramiko

@@ -15,7 +15,7 @@ from pipeline.step_adapters import (
     run_test_scenario_generation,
 )
 from services.artifact_service import ArtifactNotFoundError, ArtifactService
-from services.execution_client import ExecutionRequest, HttpExecutionClient
+from services.execution_client import ExecutionAdapter, ExecutionRequest, create_execution_client
 from services.job_service import JobNotFoundError, job_service
 from services.monitoring_event_service import monitoring_event_service
 
@@ -134,8 +134,8 @@ def _artifact_service() -> ArtifactService:
     return ArtifactService()
 
 
-def _execution_client() -> HttpExecutionClient:
-    return HttpExecutionClient()
+def _execution_client() -> ExecutionAdapter:
+    return create_execution_client()
 
 
 def _session_id(value: Optional[str], prefix: str) -> str:
@@ -391,7 +391,10 @@ async def submit_execution(request: ExecutionRequest):
         raise HTTPException(status_code=503, detail={
             "error_code": "EXECUTION_SERVICE_NOT_CONFIGURED",
             "message": "The optional external execution service is not configured.",
-            "details": "Set EXECUTION_SERVICE_URL to enable remote execution.",
+            "details": (
+                "Set EXECUTION_SERVICE_URL for HTTP execution, or set "
+                "EXECUTION_ADAPTER=ssh_docker and SSH_EXECUTION_HOST for the ROS 2 harness."
+            ),
         })
 
     async def operation():

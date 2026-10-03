@@ -1,5 +1,8 @@
-# STLC Manager: An AI-Powered Software Testing Life Cycle Management System
+# STLC Manager
 
+**Yapay Zeka Destekli Yazılım Test Yaşam Döngüsü Yönetimi**
+
+> Yazılım testinin en zaman alan aşamalarını — senaryo üretiminden optimizasyona kadar — LLM tabanlı otomasyon ile hızlandıran, end-to-end bir test yönetim platformu.
 > **Naming and project context:** This system is referred to as **STLC Manager** in the associated master's thesis and as **ESOGU DT TOOL** within [MATISSE](https://matisse-kdt.eu/), a European research project funded under the Horizon Europe programme through the Chips Joint Undertaking (Grant Agreement No. 101140216). MATISSE focuses on model-based engineering and the continuous verification and validation of industrial systems using Digital Twins (DTs).
 
 STLC Manager is an AI-assisted web application designed to manage the Software Testing Life Cycle (STLC) from source code, requirements, and the outputs of earlier testing phases.
@@ -394,9 +397,9 @@ cd backend
 python app.py
 ```
 
-Backend: <http://localhost:8000>
+Backend: <http://localhost:8100>
 
-Swagger UI: <http://localhost:8000/docs>
+Swagger UI: <http://localhost:8100/docs>
 
 ### Terminal 2 — MCP server
 
@@ -417,16 +420,16 @@ cd frontend
 npm run dev
 ```
 
-The default Vite URL is <http://localhost:5173>.
+The default Vite URL is <http://localhost:5175>.
 
 ### Quick checks
 
 ```text
-GET http://localhost:8000/
-GET http://localhost:8000/api/health/prompts
-GET http://localhost:8000/api/docker-execution/status
-GET http://localhost:8000/api/ros2-execution/status
-GET http://localhost:8000/api/remote-execution/health
+GET http://localhost:8100/
+GET http://localhost:8100/api/health/prompts
+GET http://localhost:8100/api/docker-execution/status
+GET http://localhost:8100/api/ros2-execution/status
+GET http://localhost:8100/api/remote-execution/health
 GET http://localhost:8001/health
 GET http://localhost:8001/providers/status
 ```
@@ -457,7 +460,7 @@ DEFAULT_LM_STUDIO_MODEL=llama-3.2-3b-instruct
 
 API keys can be entered through the API Key settings in the user interface and are sent to the backend with the relevant requests. Never commit API keys to the repository.
 
-The frontend has partial support for `VITE_API_BASE_URL`, but several components still use `http://localhost:8000` directly. If the frontend and backend are hosted on different machines, route all frontend API calls through a centralized base URL first.
+During development, frontend API calls use same-origin `/api` paths and Vite proxies them to `VITE_API_PROXY_TARGET` (default: `http://localhost:8100`). Set `VITE_API_BASE_URL` only when the browser must call a separately hosted backend directly.
 
 ## Tests and utility scripts
 
@@ -610,9 +613,9 @@ available. Compose always supplies the internal MongoDB address
 Verify and inspect the deployment from the Docker host:
 
 ```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/ready
-curl http://localhost:8000/openapi.json
+curl http://localhost:8100/health
+curl http://localhost:8100/ready
+curl http://localhost:8100/openapi.json
 docker compose logs -f backend
 ```
 
@@ -642,7 +645,7 @@ authentication, submission, job, or result failure.
 Run a quick deployment/auth/artifact check:
 
 ```bash
-STLC_BASE_URL=http://localhost:8000 \
+STLC_BASE_URL=http://localhost:8100 \
 STLC_API_KEY='<same value as APP_API_KEY>' \
 python scripts/external_integration_smoke.py --deployment-only
 ```
@@ -650,7 +653,7 @@ python scripts/external_integration_smoke.py --deployment-only
 Run the complete artifact → environment → scenario → case → code workflow:
 
 ```bash
-STLC_BASE_URL=http://localhost:8000 \
+STLC_BASE_URL=http://localhost:8100 \
 STLC_API_KEY='<same value as APP_API_KEY>' \
 STLC_MODEL=llama-3.2-3b-instruct \
 python scripts/external_integration_smoke.py
@@ -853,7 +856,8 @@ execution_result = wait_for(execution_job)
 - `API_AUTH_ENABLED`, `APP_API_KEY`
 - `MODEL_API_BASE_URL`, `MODEL_IDENTIFIER`, `MODEL_API_KEY`
 - `MCP_SERVER_URL`
-- `EXECUTION_SERVICE_URL`, `EXECUTION_SERVICE_TOKEN`, `EXECUTION_TIMEOUT_SECONDS`
+- `EXECUTION_ADAPTER`, `EXECUTION_SERVICE_URL`, `EXECUTION_SERVICE_TOKEN`, `EXECUTION_TIMEOUT_SECONDS`
+- `SSH_EXECUTION_HOST`, `SSH_EXECUTION_REMOTE_DIR`, `SSH_EXECUTION_IMAGE`, `SSH_EXECUTION_IDENTITY_FILE`, `SSH_EXECUTION_PASSWORD`
 - `ARTIFACT_DIR`, `UPLOAD_DIR`
 
 ### Repository and responsibility boundary
@@ -866,8 +870,8 @@ HIL/robot environment, and returns the result.
 > The HIL/docker harness implementation is not part of the STLC Manager
 > repository and is deployed independently.
 
-The STLC repository neither imports nor builds the executor implementation. A
-deployment needs only the remote contract configuration, for example:
+For an independently deployed HTTP executor, the STLC repository neither
+imports nor builds the executor implementation. Configure that boundary with:
 
 ```dotenv
 EXECUTION_SERVICE_URL=http://executor-host:8090
@@ -881,6 +885,65 @@ the standardized fields `execution_id`, `status`, timestamps, pass/fail counts,
 logs, error, and artifacts. If no URL is configured, STLC startup, readiness,
 and every generation function remain available; only `POST /api/v1/executions`
 returns structured HTTP 503 `EXECUTION_SERVICE_NOT_CONFIGURED`.
+
+The verified ASRLAB -> IFARLAB ROS 2 harness can also be selected directly:
+
+```dotenv
+EXECUTION_ADAPTER=ssh_docker
+SSH_EXECUTION_HOST=ifarlab
+SSH_EXECUTION_REMOTE_DIR=~/stlc_runs
+SSH_EXECUTION_IMAGE=ros2-exec-harness:0.3.2
+SSH_EXECUTION_IDENTITY_FILE=C:\\Users\\matisse\\.ssh\\id_ed25519_ifarlab
+# Optional fallback when unattended key authentication is unavailable.
+SSH_EXECUTION_PASSWORD=
+EXECUTION_TIMEOUT_SECONDS=300
+```
+
+This adapter performs a read-only target preflight, transfers each generated
+Python test with SCP, and invokes the harness over SSH using `--network host`,
+`--ipc=host`, and `FASTDDS_BUILTIN_TRANSPORTS=UDPv4`. The uploaded script is
+mounted read-only and remote execution is bounded by the harness itself. OpenSSH host
+keys must already be trusted. When the backend itself runs in Docker, mount the
+SSH config, private key, and `known_hosts` read-only into the `stlc` user's home
+and set `SSH_EXECUTION_IDENTITY_FILE` to that in-container key path.
+If a password is required, keep `SSH_EXECUTION_PASSWORD` only in the untracked
+server `.env`; it is never returned to the frontend or monitoring events.
+
+Remote tests follow a single-file contract: newly generated code may import
+public APIs from installed packages, but may not import package `examples/`
+scripts, relative sibling files, or `sim_robot_goal`. Required helper/controller
+classes must be included in the generated test file. Test-code generation
+validates this contract, attempts one automatic correction, and rejects
+remaining violations before uploading code to IFARLAB.
+
+For previously generated records, `ros2-exec-harness:0.2.0` and newer retain a
+compatibility export for `sim_robot_goal`; the SSH execution adapter permits
+that import only for those compatible image versions. Files submitted from the
+Test Execution remote panel are passed to the harness as `python3 <file>.py`.
+The 0.3.x entrypoint detects test functions and runs pytest itself, ensuring its
+timeout and post-test robot reset always remain active.
+The current IFARLAB runner image is `ros2-exec-harness:0.3.2`. It owns the
+per-test runtime limit and returns pytest-compatible exit codes: 0 passed, 1
+failed, 2 collection/import error, 5 no tests collected, and 124 harness timeout.
+STLC does not wrap the remote `docker run` call in another timeout. Result data
+also exposes the final `[harness] reset: status=...` value when present.
+
+Robot-focused generation can also receive a separate `robot_capabilities.json`
+from the Test Code Generation form. The contract must contain `schema_version`,
+`api.classes`, `api.allowed_imports`, and `limits`. Before use, an engineer must
+set `meta.approval.approved` to `true` and fill `approved_by` and `approved_at`;
+draft contracts are rejected before any model call. When supplied, the contract
+is treated as a closed world: undeclared controller methods, forbidden mocks,
+invalid joint-vector lengths, literal joint positions outside declared limits,
+and unsafe velocity/acceleration scaling values fail generation validation.
+All source files selected for Test Code Generation are sent and included as
+bounded implementation context; the form no longer submits only the first file.
+The form also provides a per-test input budget from 4,096 to 64,000 tokens and
+an estimator for source code, the custom prompt, one test case, and the optional
+robot capability contract. Each test case and its oracle-repair request is sent
+to the model atomically. If the selected context exceeds the configured budget,
+generation stops with an explicit error instead of splitting executable Python
+into independent responses and concatenating them.
 
 ## Monitoring Integration
 
@@ -907,11 +970,11 @@ excluded.
 
 ```bash
 curl -H "X-API-Key: $APP_API_KEY" \
-  "http://localhost:8000/api/v1/monitoring/events?session_id=session-123&limit=100"
+  "http://localhost:8100/api/v1/monitoring/events?session_id=session-123&limit=100"
 
 curl -N -H "Authorization: Bearer $APP_API_KEY" \
   -H "Last-Event-ID: evt_previous" \
-  "http://localhost:8000/api/v1/monitoring/events/stream?session_id=session-123"
+  "http://localhost:8100/api/v1/monitoring/events/stream?session_id=session-123"
 ```
 
 `MONITORING_ENABLED` controls emission and

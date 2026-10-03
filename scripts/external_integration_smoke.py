@@ -185,7 +185,7 @@ def run(args):
 def parse_args():
     repo_fixture = Path(__file__).resolve().parents[1] / "test_inputs" / "Functional_and_NonFunctional_Requirements.txt"
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default=os.getenv("STLC_BASE_URL", "http://localhost:8000"))
+    parser.add_argument("--base-url", default=os.getenv("STLC_BASE_URL", "http://localhost:8100"))
     parser.add_argument("--api-key", default=os.getenv("STLC_API_KEY"))
     parser.add_argument("--artifact", default=os.getenv("STLC_ARTIFACT_PATH", str(repo_fixture)))
     parser.add_argument("--artifact-type", default=os.getenv("STLC_ARTIFACT_TYPE", "requirement"))

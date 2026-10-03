@@ -42,7 +42,7 @@ const DockerExecutionPanel = () => {
 
   const checkDockerStatus = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/docker-execution/status');
+      const response = await axios.get('/api/docker-execution/status');
       setDockerAvailable(response.data.docker_available);
       setDockerImages(response.data.images || []);
       setContainerStatus(response.data.container_status || {});
@@ -54,7 +54,7 @@ const DockerExecutionPanel = () => {
 
   const checkRos2Status = async () => {
     try {
-      const res = await axios.get('http://localhost:8000/api/ros2-execution/status');
+      const res = await axios.get('/api/ros2-execution/status');
       setRos2Status(res.data);
     } catch {
       setRos2Status({ available: false, reason: 'Backend unreachable' });
@@ -63,7 +63,7 @@ const DockerExecutionPanel = () => {
 
   const loadAvailableOptions = async () => {
     try {
-      const robotsRes = await axios.get('http://localhost:8000/api/docker-execution/available-robots');
+      const robotsRes = await axios.get('/api/docker-execution/available-robots');
       setAvailableRobots(robotsRes.data.robot_types || [
         { id: 'generic', name: 'Generic 3-DOF', dof: 3 },
         { id: 'industrial', name: 'Industrial 6-DOF', dof: 6 },
@@ -111,7 +111,7 @@ const DockerExecutionPanel = () => {
           visual_count: ros2VisualCount,
           timeout: ros2Timeout,
         };
-        const response = await axios.post(`http://localhost:8000${endpoint}`, payload, {
+        const response = await axios.post(`${endpoint}`, payload, {
           timeout: (ros2Timeout + 30) * 1000,
         });
         setRos2Results(response.data);
@@ -144,7 +144,7 @@ const DockerExecutionPanel = () => {
         }
       }
 
-      const response = await axios.post(`http://localhost:8000${endpoint}`, payload, {
+      const response = await axios.post(`${endpoint}`, payload, {
         timeout: (timeout + 30) * 1000 // Add buffer to timeout
       });
 

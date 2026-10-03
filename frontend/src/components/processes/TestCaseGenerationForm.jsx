@@ -99,7 +99,7 @@ export default function TestCaseGenerationForm({
     try {
       console.log('[TestCaseGeneration] Testing database connection...');
       
-      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/test-connection');
+      const response = await fetch('/api/processes/test-scenario-generation/test-connection');
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -136,9 +136,9 @@ export default function TestCaseGenerationForm({
       setIsLoading(true);
       setError(null);
       
-      console.log('[TestCaseGeneration] Fetching process titles from:', 'http://localhost:8000/api/processes/test-scenario-generation/process-titles');
+      console.log('[TestCaseGeneration] Fetching process titles from:', '/api/processes/test-scenario-generation/process-titles');
       
-      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/process-titles');
+      const response = await fetch('/api/processes/test-scenario-generation/process-titles');
       
       console.log('[TestCaseGeneration] Response status:', response.status);
       console.log('[TestCaseGeneration] Response ok:', response.ok);
@@ -172,7 +172,7 @@ export default function TestCaseGenerationForm({
       setIsLoading(true);
       setError(null);
       
-      const response = await fetch(`http://localhost:8000/api/processes/test-scenario-generation/process-data/${sessionId}`);
+      const response = await fetch(`/api/processes/test-scenario-generation/process-data/${sessionId}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -207,7 +207,7 @@ export default function TestCaseGenerationForm({
       console.log('[TestCaseGeneration] Loading prompt for test type:', testType);
       
       // Use the correct endpoint for test case generation prompt
-      const response = await fetch(`http://localhost:8000/api/prompts/test-case-generation`);
+      const response = await fetch(`/api/prompts/test-case-generation`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -296,7 +296,7 @@ You MUST respond with a valid JSON object in this exact structure:
     try {
       console.log('[TestCaseGeneration] Loading test scenarios from MongoDB output for session:', sessionId);
       
-      const response = await fetch(`http://localhost:8000/api/processes/test-scenario-generation/test-scenarios/${sessionId}`);
+      const response = await fetch(`/api/processes/test-scenario-generation/test-scenarios/${sessionId}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -514,7 +514,7 @@ Generate comprehensive test cases now following the exact JSON structure above.`
         api_key: apiKey  // API key eklendi
       };
 
-      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/generate-test-cases', {
+      const response = await fetch('/api/processes/test-scenario-generation/generate-test-cases', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -607,7 +607,7 @@ Generate comprehensive test cases now following the exact JSON structure above.`
       });
 
       // Call test case generation API (no timeout - let backend handle long operations)
-      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/generate-test-cases', {
+      const response = await fetch('/api/processes/test-scenario-generation/generate-test-cases', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

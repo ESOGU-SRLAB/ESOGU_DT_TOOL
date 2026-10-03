@@ -78,7 +78,7 @@ function TestCaseOptimizationResults({ sessionId, liveResults }) {
       
       if (sessionId) {
         try {
-          const sessionResponse = await fetch(`http://localhost:8000/api/processes/test-scenario-generation/session/${sessionId}`);
+          const sessionResponse = await fetch(`/api/processes/test-scenario-generation/session/${sessionId}`);
           if (sessionResponse.ok) {
             const sessionData = await sessionResponse.json();
             processTitle = sessionData?.processes?.test_case_generation?.selected_process_title || 
@@ -92,7 +92,7 @@ function TestCaseOptimizationResults({ sessionId, liveResults }) {
       // If no process title from session, get available process titles and use the first one
       if (!processTitle) {
         try {
-          const titlesResponse = await fetch('http://localhost:8000/api/test-case-optimization/process-titles');
+          const titlesResponse = await fetch('/api/test-case-optimization/process-titles');
           if (titlesResponse.ok) {
             const titlesData = await titlesResponse.json();
             if (titlesData.success && titlesData.data.length > 0) {
@@ -111,7 +111,7 @@ function TestCaseOptimizationResults({ sessionId, liveResults }) {
       }
 
       // Fetch optimization results for this process title
-      const response = await fetch(`http://localhost:8000/api/test-case-optimization/results/${encodeURIComponent(processTitle)}`);
+      const response = await fetch(`/api/test-case-optimization/results/${encodeURIComponent(processTitle)}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -2051,7 +2051,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                 {/* Generation Summary */}
                 <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 mb-4">
                   <h4 className="font-medium text-blue-800 mb-2">Generation Summary</h4>
-                  <div className="grid grid-cols-3 gap-4 text-sm text-blue-700">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm text-blue-700">
                     <div>
                       <p className="font-medium">Total Test Cases</p>
                       <p className="text-lg">{result.summary.total_test_cases || 0}</p>
@@ -2063,6 +2063,14 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                     <div>
                       <p className="font-medium">Failed</p>
                       <p className="text-lg text-red-600">{result.summary.failed_count || 0}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Unsupported</p>
+                      <p className="text-lg text-amber-600">{result.summary.unsupported_count || 0}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Invalid / Blocked</p>
+                      <p className="text-lg text-purple-600">{result.summary.invalid_count || 0}</p>
                     </div>
                   </div>
                   <div className="mt-3 pt-3 border-t border-blue-200">
@@ -2083,31 +2091,57 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   </div>
                 </div>
 
-                {/* Generated Test Codes */}
+                  {/* Per-test generation results */}
                 <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-4">
                   <h4 className="font-medium text-green-800 mb-2">
-                    ✅ Generated Test Codes ({result.generated_tests?.length || 0})
+                    Test Generation Results ({result.generated_tests?.length || 0})
                   </h4>
                   {result.generated_tests?.length > 0 ? (
                     <div className="space-y-3">
                       {result.generated_tests.map((test, index) => (
                         <details key={index} className="cursor-pointer">
                           <summary className="text-sm text-green-700 hover:text-green-900 font-medium">
-                            {test.status === 'success' ? '✅' : '❌'} {test.test_case_id || `Test #${index + 1}`}: {test.title || 'Untitled Test'}
+                            {test.status === 'success' ? '✅' : test.status === 'unsupported' ? '⚠️' : test.status === 'invalid' ? '⛔' : '❌'} {test.test_case_id || `Test #${index + 1}`}: {test.title || 'Untitled Test'}
                           </summary>
                           <div className="mt-3 bg-white p-4 rounded border border-green-200">
                             {test.status === 'success' ? (
                               <>
-                                <div className="mb-3">
+                                 <div className="mb-3">
                                   <h6 className="font-medium text-gray-900 mb-1">Test Information</h6>
                                   <div className="text-sm text-gray-600 space-y-1">
                                     <p><strong>Test Case ID:</strong> {test.test_case_id}</p>
                                     <p><strong>Title:</strong> {test.title}</p>
                                     {test.description && <p><strong>Description:</strong> {test.description}</p>}
                                     {test.framework && <p><strong>Framework:</strong> {test.framework}</p>}
+                                   </div>
+                                 </div>
+                                {test.oracle && (
+                                  <div className={`mb-3 p-3 rounded border ${
+                                    test.oracle.passed
+                                      ? 'bg-emerald-50 border-emerald-200'
+                                      : 'bg-red-50 border-red-200'
+                                  }`}>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <h6 className={`font-medium ${test.oracle.passed ? 'text-emerald-800' : 'text-red-800'}`}>
+                                        Generation Oracle: {test.oracle.verdict?.toUpperCase() || (test.oracle.passed ? 'PASS' : 'FAIL')}
+                                      </h6>
+                                      <span className="text-xs font-semibold text-gray-600">Score: {test.oracle.score ?? 0}/100</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-1 text-xs">
+                                      {(test.oracle.checks || []).map((check, checkIndex) => (
+                                        <div key={checkIndex} className={check.passed ? 'text-emerald-700' : 'text-red-700'} title={check.details}>
+                                          {check.passed ? '✓' : '✗'} {check.name?.replaceAll('_', ' ')}
+                                        </div>
+                                      ))}
+                                    </div>
+                                    {test.oracle.issues?.length > 0 && (
+                                      <ul className="mt-2 text-xs text-red-700 list-disc list-inside">
+                                        {test.oracle.issues.map((issue, issueIndex) => <li key={issueIndex}>{issue}</li>)}
+                                      </ul>
+                                    )}
                                   </div>
-                                </div>
-                                {test.code && (
+                                )}
+                                 {test.code && (
                                   <div className="bg-gray-900 text-green-400 p-4 rounded font-mono text-sm overflow-x-auto">
                                     <pre className="whitespace-pre-wrap">{test.code}</pre>
                                   </div>
@@ -2120,9 +2154,29 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                                 )}
                               </>
                             ) : (
-                              <div className="bg-red-50 border border-red-200 rounded p-3">
-                                <h6 className="font-medium text-red-800 mb-1">Generation Failed</h6>
-                                <p className="text-sm text-red-700">{test.error || 'Unknown error occurred'}</p>
+                              <div className={`rounded p-3 border ${
+                                test.status === 'unsupported'
+                                  ? 'bg-amber-50 border-amber-200'
+                                  : test.status === 'invalid'
+                                    ? 'bg-purple-50 border-purple-200'
+                                    : 'bg-red-50 border-red-200'
+                              }`}>
+                                <h6 className="font-medium mb-1">
+                                  {test.status === 'unsupported'
+                                    ? 'Capability Unsupported'
+                                    : test.status === 'invalid'
+                                      ? 'Invalid Test — Execution Blocked'
+                                      : 'Generation Failed'}
+                                </h6>
+                                <p className="text-sm">
+                                  {test.eligibility_reason || test.error || 'Unknown error occurred'}
+                                </p>
+                                {test.repair_attempted && (
+                                  <p className="mt-2 text-xs">Automatic capability repair was attempted.</p>
+                                )}
+                                {test.code && (
+                                  <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-gray-900 p-3 text-xs text-gray-100">{test.code}</pre>
+                                )}
                               </div>
                             )}
                           </div>

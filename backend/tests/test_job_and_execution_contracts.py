@@ -14,10 +14,14 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 import services.execution_client as execution_module  # noqa: E402
+import core.database as database_module  # noqa: E402
+from pipeline.pipeline_models import PipelineRunRequest, StepConfig  # noqa: E402
+from pipeline.step_adapters import run_test_execution  # noqa: E402
 from services.execution_client import (  # noqa: E402
     ExecutionNotConfiguredError,
     ExecutionRequest,
     HttpExecutionClient,
+    SshDockerExecutionClient,
 )
 from services.job_service import JobNotFoundError, JobService  # noqa: E402
 
@@ -228,3 +232,142 @@ def test_execution_adapter_failures(monkeypatch, response, expected_exception):
     client = HttpExecutionClient(base_url="https://executor.example", timeout_seconds=1)
     with pytest.raises(expected_exception):
         asyncio.run(client.submit(ExecutionRequest(test_code="assert True")))
+
+
+def test_ssh_docker_adapter_uploads_and_runs_verified_ros2_command(tmp_path):
+    client = SshDockerExecutionClient(
+        host="ifarlab",
+        remote_dir="~/stlc_runs",
+        image="ros2-exec-harness:0.3.2",
+        identity_file=tmp_path / "id_ed25519_ifarlab",
+        password="",
+        timeout_seconds=60,
+        connect_timeout_seconds=5,
+    )
+    calls = []
+
+    async def fake_run(command, timeout):
+        calls.append((command, timeout))
+        if command[0] == "scp":
+            local_path = Path(command[-2])
+            assert local_path.read_text(encoding="utf-8") == "print('robot test')"
+        return 0, "remote ok"
+
+    client._run_command = fake_run
+    result = asyncio.run(client.submit(ExecutionRequest(
+        test_code="print('robot test')",
+        language="python",
+        test_case_id="TC-ROS2-1",
+        configuration={"timeout_seconds": 30},
+    )))
+
+    assert result.status == "completed"
+    assert (result.passed, result.failed) == (1, 0)
+    assert len(calls) == 3
+    assert calls[0][0][0] == "ssh"
+    assert "docker image inspect ros2-exec-harness:0.3.2" in calls[0][0][-1]
+    assert calls[1][0][0] == "scp"
+    assert calls[1][0][-1].startswith("ifarlab:~/stlc_runs/exec-")
+    remote_command = calls[2][0][-1]
+    assert "--network host" in remote_command
+    assert "--ipc=host" in remote_command
+    assert "FASTDDS_BUILTIN_TRANSPORTS=UDPv4" in remote_command
+    assert not remote_command.startswith("timeout ")
+    assert "python3 -m pytest" not in remote_command
+    assert remote_command.endswith("python3 /harness_ws/generated_script.py")
+    assert calls[2][1] is None
+    assert "/harness_ws/generated_script.py:ro" in remote_command
+    assert result.artifacts[0]["sha256"]
+
+
+def test_ssh_docker_adapter_reports_remote_container_failure():
+    client = SshDockerExecutionClient(
+        host="ifarlab",
+        remote_dir="~/stlc_runs",
+        image="ros2-exec-harness:0.3.2",
+        password="",
+        timeout_seconds=20,
+        connect_timeout_seconds=5,
+    )
+    responses = iter([
+        (0, "preflight ok"),
+        (0, "uploaded"),
+        (124, "timed out\n[harness] reset: status=homed"),
+    ])
+
+    async def fake_run(_command, _timeout):
+        return next(responses)
+
+    client._run_command = fake_run
+    result = asyncio.run(client.submit(ExecutionRequest(test_code="while True: pass")))
+    assert result.status == "blocked"
+    assert result.verdict == "blocked"
+    assert result.failed == 0
+    assert result.blocked == 1
+    assert result.error == "Remote harness stopped the test after its 10-minute limit (exit code 124)"
+    assert result.exit_code == 124
+    assert result.reset_status == "homed"
+    assert "timed out" in result.logs
+
+
+def test_pipeline_ssh_docker_sends_generated_test_codes(monkeypatch):
+    generated = [
+        {"test_case_id": "TC-1", "code": "print('one')"},
+        {"test_case_id": "TC-2", "test_code": "print('two')"},
+    ]
+
+    class FakeCollection:
+        async def find_one(self, query):
+            assert query == {"session_id": "session-ssh"}
+            return {
+                "processes": {
+                    "test_code_generation": {
+                        "output": {"generated_tests": generated}
+                    }
+                }
+            }
+
+    class FakeDatabase:
+        def __getitem__(self, name):
+            assert name == "session_history"
+            return FakeCollection()
+
+    async def fake_get_database():
+        return FakeDatabase()
+
+    submitted = []
+
+    class FakeSshClient:
+        is_configured = True
+
+        async def submit(self, request):
+            submitted.append(request)
+            return execution_module.ExecutionResult(
+                execution_id=f"exec-{request.test_case_id}",
+                status="completed",
+                passed=1,
+                logs=f"ran {request.test_case_id}",
+                artifacts=[{"remote_path": f"~/stlc_runs/{request.test_case_id}.py"}],
+            )
+
+    monkeypatch.setattr(database_module, "get_database", fake_get_database)
+    monkeypatch.setattr(execution_module, "SshDockerExecutionClient", FakeSshClient)
+
+    request = PipelineRunRequest(
+        session_id="session-ssh",
+        selected_steps=["test-execution"],
+        process_title="Remote ROS2 pipeline",
+        step_configs={
+            "test-execution": StepConfig(
+                execution_method="ssh_docker",
+                remote_timeout=45,
+            )
+        },
+    )
+    result = asyncio.run(run_test_execution(request, {}))
+
+    assert result.status.value == "completed"
+    assert result.output["summary"] == {"total": 2, "successful": 2, "failed": 0}
+    assert [item.test_code for item in submitted] == ["print('one')", "print('two')"]
+    assert all(item.configuration == {"timeout_seconds": 45} for item in submitted)
+    assert all(item.metadata == {"source": "stlc_pipeline"} for item in submitted)

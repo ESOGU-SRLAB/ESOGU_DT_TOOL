@@ -57,6 +57,13 @@ class Settings:
     execution_service_url: Optional[str]
     execution_service_token: Optional[str]
     execution_timeout_seconds: int
+    execution_adapter: str
+    ssh_execution_host: Optional[str]
+    ssh_execution_remote_dir: str
+    ssh_execution_image: str
+    ssh_execution_identity_file: Optional[Path]
+    ssh_execution_password: Optional[str]
+    ssh_execution_connect_timeout_seconds: int
     monitoring_enabled: bool
     monitoring_event_retention_days: int
 
@@ -70,7 +77,8 @@ class Settings:
         origins = _as_list(
             "CORS_ALLOWED_ORIGINS",
             "http://localhost:3000,http://127.0.0.1:3000,"
-            "http://localhost:5173,http://127.0.0.1:5173",
+            "http://localhost:5173,http://127.0.0.1:5173,"
+            "http://localhost:5175,http://127.0.0.1:5175",
         )
         if "*" in origins and auth_enabled:
             raise ValueError(
@@ -79,7 +87,7 @@ class Settings:
 
         return cls(
             app_host=os.getenv("APP_HOST", "0.0.0.0"),
-            app_port=_as_int("APP_PORT", 8000),
+            app_port=_as_int("APP_PORT", 8100),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             app_reload=_as_bool("APP_RELOAD", False),
             initialize_prompts_on_startup=_as_bool("INITIALIZE_PROMPTS_ON_STARTUP", True),
@@ -95,6 +103,19 @@ class Settings:
             execution_service_url=os.getenv("EXECUTION_SERVICE_URL") or None,
             execution_service_token=os.getenv("EXECUTION_SERVICE_TOKEN") or None,
             execution_timeout_seconds=_as_int("EXECUTION_TIMEOUT_SECONDS", 1900),
+            execution_adapter=os.getenv("EXECUTION_ADAPTER", "http").strip().lower(),
+            ssh_execution_host=os.getenv("SSH_EXECUTION_HOST") or None,
+            ssh_execution_remote_dir=os.getenv("SSH_EXECUTION_REMOTE_DIR", "~/stlc_runs"),
+            ssh_execution_image=os.getenv("SSH_EXECUTION_IMAGE", "ros2-exec-harness:0.3.2"),
+            ssh_execution_identity_file=(
+                Path(os.environ["SSH_EXECUTION_IDENTITY_FILE"])
+                if os.getenv("SSH_EXECUTION_IDENTITY_FILE")
+                else None
+            ),
+            ssh_execution_password=os.getenv("SSH_EXECUTION_PASSWORD") or None,
+            ssh_execution_connect_timeout_seconds=_as_int(
+                "SSH_EXECUTION_CONNECT_TIMEOUT_SECONDS", 10
+            ),
             monitoring_enabled=_as_bool("MONITORING_ENABLED", True),
             monitoring_event_retention_days=_as_int("MONITORING_EVENT_RETENTION_DAYS", 30),
         )

@@ -13,6 +13,17 @@ from core.database import get_db
 from utils.model_client import LLMClient
 from utils.file_handler import FileHandler
 from utils.text_processor import TextProcessor
+from utils.text_splitter import count_tokens
+from utils.standalone_test_validation import (
+    STANDALONE_REMOTE_REQUIREMENTS,
+)
+from services.test_code_oracle import ORACLE_PROMPT_REQUIREMENTS, evaluate_test_code
+from services.robot_capability_service import (
+    capability_descriptor,
+    capability_prompt_context,
+    validate_generated_code_against_capabilities,
+)
+from utils.standalone_test_validation import supports_legacy_sim_robot_goal
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +239,13 @@ class TestCodeGenerationService:
             logger.error(f"Error getting unique test cases: {str(e)}")
             return []
     
-    async def analyze_source_code(self, source_files: List, model_name: str = None, api_key: str = None) -> Dict[str, Any]:
+    async def analyze_source_code(
+        self,
+        source_files: List,
+        model_name: str = None,
+        api_key: str = None,
+        max_input_tokens: int = 64000,
+    ) -> Dict[str, Any]:
         """
         Yüklenen source code'ları analiz eder
         """
@@ -256,7 +273,7 @@ class TestCodeGenerationService:
                     
                     code_analysis["files"].append({
                         "name": file_name,
-                        "content": content[:2000],  # İlk 2000 karakter
+                        "content": content[:12000],
                         "size": len(content)
                     })
                     
@@ -275,7 +292,7 @@ class TestCodeGenerationService:
                 4. Key patterns and frameworks used
                 
                 Source Code:
-                {all_content[:5000]}  # İlk 5000 karakter
+                {all_content[:40000]}
                 
                 Return analysis as JSON:
                 {{
@@ -287,11 +304,18 @@ class TestCodeGenerationService:
                 """
                 
                 try:
+                    analysis_tokens = count_tokens(analysis_prompt)
+                    if analysis_tokens > max_input_tokens:
+                        raise ValueError(
+                            f"Source analysis input requires {analysis_tokens} tokens, exceeding "
+                            f"the configured {max_input_tokens}-token budget."
+                        )
                     llm_client = LLMClient(model_name=model_name, api_key=api_key, use_case='test_code_generation')
                     analysis_response = await llm_client.generate_response(
                         analysis_prompt,
                         temperature=0.1,
-                        max_tokens=90000  # Use Gemini 2.5 Flash full capacity
+                        max_tokens=8192,
+                        skip_chunking=True,
                     )
                     
                     if analysis_response:
@@ -331,7 +355,9 @@ class TestCodeGenerationService:
                                 environment_name: str = None,
                                 output_format: str = "JSON",
                                 api_key: str = None,
-                                max_test_cases: int = None) -> Dict[str, Any]:
+                                max_test_cases: int = None,
+                                capability_contract: Dict[str, Any] = None,
+                                max_input_tokens: int = 64000) -> Dict[str, Any]:
         """
         Ana test code generation fonksiyonu
         
@@ -339,6 +365,12 @@ class TestCodeGenerationService:
             max_test_cases: Optional limit on number of test cases to process (for batch processing)
         """
         try:
+            if not 4096 <= int(max_input_tokens) <= 64000:
+                return {
+                    "success": False,
+                    "error": "max_input_tokens must be between 4096 and 64000",
+                }
+            max_input_tokens = int(max_input_tokens)
             # Validate required environment_name
             if not environment_name or environment_name.strip() == "":
                 return {
@@ -378,7 +410,12 @@ class TestCodeGenerationService:
                 logger.info(f"⚠️ Limited test cases from {original_count} to {len(unique_test_cases)} due to max_test_cases limit")
             
             # 3. Source code'u analiz et
-            code_analysis = await self.analyze_source_code(source_files, model_name, api_key)
+            code_analysis = await self.analyze_source_code(
+                source_files,
+                model_name,
+                api_key,
+                max_input_tokens=max_input_tokens,
+            )
             if "error" in code_analysis:
                 return {"success": False, "error": f"Source code analysis failed: {code_analysis['error']}"}
             
@@ -422,12 +459,21 @@ class TestCodeGenerationService:
                                 environment_info, 
                                 llm_client,
                                 i + 1,
-                                custom_prompt
+                                custom_prompt,
+                                capability_contract,
+                                max_input_tokens,
                             )
                             if test_code:
-                                successful_generations += 1
                                 generated_tests.append(test_code)
-                                logger.info(f"✅ Successfully generated test {i+1}/{total_cases}")
+                                if test_code.get("status") == "success":
+                                    successful_generations += 1
+                                    logger.info(f"✅ Successfully generated test {i+1}/{total_cases}")
+                                else:
+                                    logger.error(
+                                        "❌ Test %s failed generation/oracle validation: %s",
+                                        i + 1,
+                                        test_code.get("error", "Unknown generation error"),
+                                    )
                                 break
                                 
                         except Exception as retry_error:
@@ -489,9 +535,16 @@ class TestCodeGenerationService:
                 "generated_tests": generated_tests,
                 "generated_count": len([t for t in generated_tests if t.get("status") == "success"]),
                 "failed_count": len([t for t in generated_tests if t.get("status") == "error"]),
+                "unsupported_count": len([t for t in generated_tests if t.get("status") == "unsupported"]),
+                "invalid_count": len([t for t in generated_tests if t.get("status") == "invalid"]),
                 "model_name": model_name,
                 "custom_prompt": custom_prompt,
                 "output_format": output_format,
+                "capability_contract": (
+                    capability_descriptor(capability_contract)
+                    if capability_contract else None
+                ),
+                "max_input_tokens": max_input_tokens,
                 "timestamp": datetime.now().isoformat()
             }
             
@@ -510,7 +563,9 @@ class TestCodeGenerationService:
                                        environment_info: Dict[str, Any], 
                                        llm_client: LLMClient,
                                        test_number: int,
-                                       custom_prompt: str = None) -> Dict[str, Any]:
+                                       custom_prompt: str = None,
+                                       capability_contract: Dict[str, Any] = None,
+                                       max_input_tokens: int = 64000) -> Dict[str, Any]:
         """
         Tek bir test case için test kodu üretir
         """
@@ -563,8 +618,16 @@ class TestCodeGenerationService:
                 code_analysis, 
                 environment_info, 
                 template,
-                custom_prompt
+                custom_prompt,
+                capability_contract,
             )
+            input_tokens = count_tokens(prompt)
+            if input_tokens > max_input_tokens:
+                raise ValueError(
+                    f"Test {test_case_info['id']} input requires {input_tokens} tokens, "
+                    f"exceeding the configured {max_input_tokens}-token budget. "
+                    "Increase the budget up to 64000 or reduce the selected source/context."
+                )
             
             # Model tipine göre timeout ayarları
             is_gemini = hasattr(llm_client, 'is_gemini') and llm_client.is_gemini
@@ -587,7 +650,8 @@ class TestCodeGenerationService:
                     llm_client.generate_response(
                         prompt,
                         temperature=0.2,
-                        max_tokens=90000 if is_gemini else 8192
+                        max_tokens=8192,
+                        skip_chunking=True,
                     ),
                     timeout=timeout_seconds
                 )
@@ -607,6 +671,159 @@ class TestCodeGenerationService:
             
             # Test kodu response'unu temizle
             test_code = self._clean_test_code_response(response, language)
+
+            if test_code.startswith("CAPABILITY_UNSUPPORTED:"):
+                reason = test_code.split(":", 1)[1].strip() or "Test intent is not supported by the approved capability contract."
+                return {
+                    "test_case_id": test_case_info["id"],
+                    "title": test_case_info["title"],
+                    "description": test_case_info["description"],
+                    "objective": test_case_info["objective"],
+                    "framework": framework,
+                    "language": language,
+                    "code": None,
+                    "status": "unsupported",
+                    "execution_eligibility": "unsupported",
+                    "eligibility_reason": reason,
+                    "repair_attempted": False,
+                    "input_tokens": input_tokens,
+                    "input_token_budget": max_input_tokens,
+                }
+
+            image_tag = (
+                capability_contract.get("meta", {})
+                .get("pinned_sources", {})
+                .get("image", {})
+                .get("tag", "")
+                if capability_contract else ""
+            )
+            allow_legacy_import = supports_legacy_sim_robot_goal(image_tag)
+            oracle_report = evaluate_test_code(
+                test_code,
+                language,
+                allow_legacy_sim_robot_goal=allow_legacy_import,
+            )
+            repair_attempted = False
+            capability_issues = (
+                validate_generated_code_against_capabilities(test_code, capability_contract)
+                if capability_contract else []
+            )
+            if capability_issues:
+                oracle_report["issues"].extend(capability_issues)
+                oracle_report["checks"].append({
+                    "name": "robot_capability_contract",
+                    "passed": False,
+                    "details": " ".join(capability_issues),
+                })
+                oracle_report["passed"] = False
+                oracle_report["verdict"] = "fail"
+
+            if not oracle_report["passed"]:
+                repair_attempted = True
+                logger.warning(
+                    "Generated test failed the generation oracle: %s",
+                    " ".join(oracle_report["issues"]),
+                )
+                capability_repair_rules = """
+Do not define, copy, embed, mock, or replace a controller or any other system-under-test class.
+Use only imports and APIs explicitly declared by the approved capability contract.
+Preserve the original observable test intent. Do not substitute an unrelated robot action merely to make the code executable.
+If that intent cannot be tested through the declared capability API, return exactly:
+CAPABILITY_UNSUPPORTED: <concrete reason>
+""".strip() if capability_contract else """
+Embed only genuinely required test helpers in the same file. Do not copy the system under test.
+""".strip()
+                repair_prompt = f"""
+{prompt}
+
+## REQUIRED CORRECTION
+The previous generated code failed the deterministic generation oracle.
+Oracle findings:
+{chr(10).join(f'- {issue}' for issue in oracle_report['issues'])}
+
+Rewrite the complete test code. Preserve the test intent, remove every invalid
+import, include a real executable test entry point, and add observable pass/fail
+verification.
+
+{capability_repair_rules}
+
+Return only the corrected executable code or CAPABILITY_UNSUPPORTED.
+
+## PREVIOUS INVALID CODE
+{test_code}
+""".strip()
+                repair_tokens = count_tokens(repair_prompt)
+                if repair_tokens > max_input_tokens:
+                    raise ValueError(
+                        f"Oracle repair input requires {repair_tokens} tokens, exceeding "
+                        f"the configured {max_input_tokens}-token budget."
+                    )
+                repaired_response = await asyncio.wait_for(
+                    llm_client.generate_response(
+                        repair_prompt,
+                        temperature=0.1,
+                        max_tokens=8192,
+                        skip_chunking=True,
+                    ),
+                    timeout=timeout_seconds,
+                )
+                test_code = self._clean_test_code_response(repaired_response, language)
+                if test_code.startswith("CAPABILITY_UNSUPPORTED:"):
+                    reason = test_code.split(":", 1)[1].strip() or "Test intent is not supported by the approved capability contract."
+                    return {
+                        "test_case_id": test_case_info["id"],
+                        "title": test_case_info["title"],
+                        "description": test_case_info["description"],
+                        "objective": test_case_info["objective"],
+                        "framework": framework,
+                        "language": language,
+                        "code": None,
+                        "status": "unsupported",
+                        "execution_eligibility": "unsupported",
+                        "eligibility_reason": reason,
+                        "repair_attempted": True,
+                        "input_tokens": input_tokens,
+                        "input_token_budget": max_input_tokens,
+                    }
+                oracle_report = evaluate_test_code(
+                    test_code,
+                    language,
+                    allow_legacy_sim_robot_goal=allow_legacy_import,
+                )
+                capability_issues = (
+                    validate_generated_code_against_capabilities(test_code, capability_contract)
+                    if capability_contract else []
+                )
+                if capability_issues:
+                    oracle_report["issues"].extend(capability_issues)
+                    oracle_report["checks"].append({
+                        "name": "robot_capability_contract",
+                        "passed": False,
+                        "details": " ".join(capability_issues),
+                    })
+                    oracle_report["passed"] = False
+                    oracle_report["verdict"] = "fail"
+                if not oracle_report["passed"]:
+                    reason = (
+                        "Generated code failed the execution oracle after automatic repair: "
+                        + " ".join(oracle_report["issues"])
+                    )
+                    return {
+                        "test_case_id": test_case_info["id"],
+                        "title": test_case_info["title"],
+                        "description": test_case_info["description"],
+                        "objective": test_case_info["objective"],
+                        "framework": framework,
+                        "language": language,
+                        "code": test_code,
+                        "status": "invalid",
+                        "execution_eligibility": "invalid",
+                        "eligibility_reason": reason,
+                        "repair_attempted": True,
+                        "oracle": oracle_report,
+                        "input_tokens": input_tokens,
+                        "input_token_budget": max_input_tokens,
+                    }
             
             return {
                 "test_case_id": test_case_info["id"],
@@ -617,7 +834,13 @@ class TestCodeGenerationService:
                 "language": language,
                 "code": test_code,
                 "status": "success",
-                "filename": self._generate_filename(test_case_info["title"], language, test_number)
+                "execution_eligibility": "eligible",
+                "eligibility_reason": None,
+                "repair_attempted": repair_attempted,
+                "filename": self._generate_filename(test_case_info["title"], language, test_number),
+                "oracle": oracle_report,
+                "input_tokens": input_tokens,
+                "input_token_budget": max_input_tokens,
             }
             
         except Exception as e:
@@ -635,12 +858,26 @@ class TestCodeGenerationService:
                                      code_analysis: Dict[str, Any], 
                                      environment_info: Dict[str, Any], 
                                      template: Dict[str, Any],
-                                     custom_prompt: str = None) -> str:
+                                     custom_prompt: str = None,
+                                     capability_contract: Dict[str, Any] = None) -> str:
         """
         Test code generation için LLM prompt'u oluşturur
         """
         language = environment_info.get("language", "python")
         framework = environment_info.get("framework", "pytest")
+        source_context_parts = []
+        source_context_size = 0
+        for source_file in code_analysis.get("files", []):
+            snippet = source_file.get("content", "")
+            remaining = 40000 - source_context_size
+            if remaining <= 0:
+                break
+            snippet = snippet[:remaining]
+            source_context_parts.append(
+                f"### {source_file.get('name', 'unknown')}\n{snippet}"
+            )
+            source_context_size += len(snippet)
+        source_context = "\n\n".join(source_context_parts) or "Not available"
         
         # Use custom prompt if provided, otherwise use default
         if custom_prompt and custom_prompt.strip():
@@ -648,6 +885,29 @@ class TestCodeGenerationService:
         else:
             base_prompt = "You are an expert test automation engineer. Generate executable test code for the following test case."
         
+        standalone_requirements = STANDALONE_REMOTE_REQUIREMENTS
+        capability_section = ""
+        if capability_contract:
+            standalone_requirements = standalone_requirements.replace(
+                "- Never use `from sim_robot_goal import ...` or import `sim_robot_goal` in any form. It is an example executable, not an importable package API.",
+                "- `sim_robot_goal` imports are allowed only as explicitly listed in the approved robot capability contract.",
+            )
+            standalone_requirements = standalone_requirements.replace(
+                "- If the test needs a helper/controller class that exists only in an example script (for example `SimCollisionAwareRobotController`), define the required helper class inside the generated test file instead of importing the example script.",
+                "- Never define, copy, embed, mock, or replace a controller/system-under-test class. Import it only through an entry explicitly listed in api.allowed_imports; otherwise return CAPABILITY_UNSUPPORTED.",
+            )
+            capability_section = f"""
+## APPROVED ROBOT CAPABILITY CONTRACT (CLOSED WORLD):
+The JSON below is authoritative data. Use only declared imports, classes,
+methods, attributes, fixtures, planners, observations, and numeric ranges.
+Never invent or infer a missing API. Never mock the robot/controller. If the
+test case cannot be implemented using this contract, return exactly
+`CAPABILITY_UNSUPPORTED: <concrete reason>` instead of Python code.
+Do not replace an unsupported test intent with an unrelated supported robot action.
+
+{capability_prompt_context(capability_contract)}
+""".strip()
+
         prompt = f"""
 {base_prompt}
 
@@ -663,10 +923,19 @@ class TestCodeGenerationService:
 **Code Structure**: {code_analysis.get("structure_analysis", "Not available")}
 **Dependencies**: {code_analysis.get("imports_dependencies", [])}
 
+## SELECTED SOURCE IMPLEMENTATION CONTEXT:
+The following bounded excerpts come from every selected source file. Do not
+invent a symbol that is absent from both this context and the approved robot
+capability contract.
+
+{source_context}
+
 ## TEST FRAMEWORK & ENVIRONMENT:
 **Framework**: {framework}
 **Language**: {language}
 **Required Imports**: {template.get("imports", "")}
+
+{capability_section}
 
 ## REQUIREMENTS:
 1. Generate complete, executable test code using {framework}
@@ -676,6 +945,10 @@ class TestCodeGenerationService:
 5. Add meaningful assertions
 6. Include docstring explaining the test purpose
 7. Make it ready to run without modifications
+
+{standalone_requirements if language.lower() in {"python", "py", "python3"} else ""}
+
+{ORACLE_PROMPT_REQUIREMENTS}
 
 ## OUTPUT FORMAT:
 Return ONLY the executable test code, no explanations or markdown formatting.
@@ -758,13 +1031,17 @@ Return ONLY the executable test code, no explanations or markdown formatting.
                         "model_name": results.get("model_name", "llama3.2:3b"),  # Unified field name
                         "environment_session_id": results.get("environment_session_id"),
                         "output_format": results.get("output_format", "JSON"),  # Add missing UI field
-                        "total_test_cases": results.get("total_test_cases", 0)
+                        "total_test_cases": results.get("total_test_cases", 0),
+                        "capability_contract": results.get("capability_contract"),
+                        "max_input_tokens": results.get("max_input_tokens", 64000),
                     },
                     "output": {
                         "success": results.get("success", False),
                         "generated_tests": results.get("generated_tests", []),
                         "generated_count": results.get("generated_count", 0),
                         "failed_count": results.get("failed_count", 0),
+                        "unsupported_count": results.get("unsupported_count", 0),
+                        "invalid_count": results.get("invalid_count", 0),
                         "environment_info": results.get("environment_info", {}),  # Keep only one copy
                         "data": results  # Backward compatibility
                     }

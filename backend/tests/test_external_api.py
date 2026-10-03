@@ -196,7 +196,10 @@ def test_execution_endpoint_reports_missing_optional_executor(monkeypatch):
     assert response.json() == {
         "error_code": "EXECUTION_SERVICE_NOT_CONFIGURED",
         "message": "The optional external execution service is not configured.",
-        "details": "Set EXECUTION_SERVICE_URL to enable remote execution.",
+        "details": (
+            "Set EXECUTION_SERVICE_URL for HTTP execution, or set "
+            "EXECUTION_ADAPTER=ssh_docker and SSH_EXECUTION_HOST for the ROS 2 harness."
+        ),
         "job_id": None,
     }
 

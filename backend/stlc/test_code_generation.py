@@ -6,8 +6,17 @@ STLC'nin Test Code Generation adımına ait işlemleri yönetir.
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from services.test_code_generation_service import TestCodeGenerationService
+from services.robot_capability_service import (
+    RobotCapabilityError,
+    parse_robot_capability_json,
+)
 import logging
+import json
+import math
 from typing import Optional, List
+from utils.text_splitter import count_tokens
+from services.robot_capability_service import capability_prompt_context
+from core.settings import get_settings
 
 router = APIRouter()
 logger = logging.getLogger("test_code_generation")
@@ -16,6 +25,139 @@ logger = logging.getLogger("test_code_generation")
 def _service() -> TestCodeGenerationService:
     """Create the DB-backed service per request instead of at application import."""
     return TestCodeGenerationService()
+
+
+async def _load_capability_contract(
+    capability_file: Optional[UploadFile],
+):
+    if capability_file is None:
+        return None
+    try:
+        raw = await capability_file.read()
+        contract = parse_robot_capability_json(
+            raw,
+            capability_file.filename or "robot_capabilities.json",
+        )
+        expected_image = get_settings().ssh_execution_image
+        pinned_image = (
+            contract.get("meta", {})
+            .get("pinned_sources", {})
+            .get("image", {})
+            .get("tag")
+        )
+        if pinned_image and expected_image and pinned_image != expected_image:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Robot capability contract is pinned to {pinned_image}, but the "
+                    f"configured remote harness is {expected_image}. Upload the matching, "
+                    "manually approved robot_capabilities.json."
+                ),
+            )
+        return contract
+    except RobotCapabilityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/token-estimate")
+async def estimate_test_code_generation_tokens(
+    process_title: str = Form(...),
+    environment_session_id: str = Form(...),
+    files: List[UploadFile] = File(...),
+    custom_prompt: Optional[str] = Form(None),
+    capability_file: Optional[UploadFile] = File(None),
+    max_input_tokens: int = Form(64000),
+):
+    """Estimate the exact per-test prompt size before starting generation."""
+    if not 4096 <= max_input_tokens <= 64000:
+        raise HTTPException(status_code=400, detail="max_input_tokens must be between 4096 and 64000")
+    service = _service()
+    capability_contract = await _load_capability_contract(capability_file)
+    test_cases = service.get_unique_test_cases_by_process_title(process_title)
+    if not test_cases:
+        raise HTTPException(status_code=404, detail="No test cases found for the selected process")
+
+    selected_env = next(
+        (
+            item for item in service.get_environment_setups()
+            if item["session_id"] == environment_session_id
+        ),
+        None,
+    )
+    if not selected_env:
+        raise HTTPException(status_code=404, detail="Selected environment setup not found")
+    environment_info = selected_env["environment_info"]
+    framework = environment_info.get("framework", "pytest")
+    template = {
+        "pytest": {"imports": "import pytest\nimport unittest.mock as mock"},
+        "unittest": {"imports": "import unittest\nfrom unittest import mock"},
+    }.get(framework, {"imports": ""})
+
+    code_files = []
+    raw_source = []
+    for upload in files:
+        raw = await upload.read()
+        content = raw.decode("utf-8", errors="replace")
+        raw_source.append(content)
+        code_files.append({
+            "name": upload.filename or "unknown",
+            "content": content[:12000],
+            "size": len(content),
+        })
+    code_analysis = {
+        "files": code_files,
+        "structure_analysis": "Token estimate preview; final analysis may add a small summary.",
+        "imports_dependencies": [],
+    }
+
+    per_case = []
+    for index, test_case in enumerate(test_cases, 1):
+        test_case_info = {
+            "id": test_case.get("TestCaseID", f"TC_{index}"),
+            "title": test_case.get("Title", ""),
+            "description": test_case.get("Description", ""),
+            "objective": test_case.get("Objective", ""),
+            "steps": test_case.get("TestSteps", []) or [],
+        }
+        prompt = service._create_test_generation_prompt(
+            test_case_info,
+            code_analysis,
+            environment_info,
+            template,
+            custom_prompt,
+            capability_contract,
+        )
+        per_case.append({
+            "test_case_id": test_case_info["id"],
+            "tokens": count_tokens(prompt),
+        })
+
+    totals = [item["tokens"] for item in per_case]
+    maximum = max(totals)
+    components = {
+        "source_code_raw": count_tokens("\n".join(raw_source)),
+        "source_code_included": count_tokens("\n".join(item["content"] for item in code_files)),
+        "custom_prompt": count_tokens(custom_prompt or ""),
+        "largest_test_case": max(
+            count_tokens(json.dumps(item, ensure_ascii=False)) for item in test_cases
+        ),
+        "robot_capabilities": count_tokens(
+            capability_prompt_context(capability_contract) if capability_contract else ""
+        ),
+    }
+    return {
+        "success": True,
+        "max_input_tokens": max_input_tokens,
+        "test_case_count": len(per_case),
+        "min_tokens_per_test": min(totals),
+        "max_tokens_per_test": maximum,
+        "average_tokens_per_test": round(sum(totals) / len(totals)),
+        "fits_budget": maximum <= max_input_tokens,
+        "legacy_chunk_count": math.ceil(maximum / max_input_tokens),
+        "components": components,
+        "per_test_case": per_case,
+        "note": "Each test case is generated in one atomic LLM request; executable code responses are never concatenated from chunks.",
+    }
 
 @router.get("/environment-setups")
 async def get_environment_setups():
@@ -117,7 +259,9 @@ async def process_test_code_generation(
     environment_name: Optional[str] = Form(None),
     output_format: Optional[str] = Form("JSON"),
     api_key: Optional[str] = Form(None),
-    max_test_cases: Optional[int] = Form(None)
+    max_test_cases: Optional[int] = Form(None),
+    capability_file: Optional[UploadFile] = File(None),
+    max_input_tokens: int = Form(64000),
 ):
     """
     Standard process runner for test code generation
@@ -151,6 +295,7 @@ async def process_test_code_generation(
         if api_key:
             logger.info(f"API key preview: {api_key[:15]}...")
         
+        capability_contract = await _load_capability_contract(capability_file)
         result = await _service().generate_test_codes(
             process_title=process_title,
             environment_session_id=environment_session_id,
@@ -161,7 +306,9 @@ async def process_test_code_generation(
             environment_name=environment_name,
             output_format=output_format,
             api_key=api_key,
-            max_test_cases=max_test_cases
+            max_test_cases=max_test_cases,
+            capability_contract=capability_contract,
+            max_input_tokens=max_input_tokens,
         )
         
         return result
@@ -182,7 +329,10 @@ async def generate_test_code(
     session_id: Optional[str] = Form(None),
     environment_name: Optional[str] = Form(None),
     output_format: Optional[str] = Form("JSON"),
-    custom_prompt: Optional[str] = Form(None)
+    custom_prompt: Optional[str] = Form(None),
+    max_test_cases: Optional[int] = Form(None),
+    capability_file: Optional[UploadFile] = File(None),
+    max_input_tokens: int = Form(64000),
 ):
     """
     Legacy endpoint for test code generation (backward compatibility)
@@ -213,6 +363,7 @@ async def generate_test_code(
             logger.info(f"API key preview: {api_key[:15]}...")
         logger.info(f"Session ID: {session_id}")
         
+        capability_contract = await _load_capability_contract(capability_file)
         result = await _service().generate_test_codes(
             process_title=process_title,
             environment_session_id=environment_session_id,
@@ -222,7 +373,10 @@ async def generate_test_code(
             session_id=session_id,
             environment_name=environment_name,
             output_format=output_format,
-            custom_prompt=custom_prompt
+            custom_prompt=custom_prompt,
+            max_test_cases=max_test_cases,
+            capability_contract=capability_contract,
+            max_input_tokens=max_input_tokens,
         )
         
         return result

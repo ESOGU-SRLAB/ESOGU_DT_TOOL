@@ -50,10 +50,11 @@ class StepConfig(BaseModel):
     # Test Code Generation specific
     output_format: Optional[str] = "json"
     max_test_cases: Optional[int] = None
+    max_input_tokens: Optional[int] = 64000
 
     # Test Execution specific
     execution_mode: Optional[str] = "standard"          # legacy, kept for compat
-    execution_method: Optional[str] = "ai"              # "ai" | "docker" | "robot"
+    execution_method: Optional[str] = "ai"              # "ai" | "docker" | "robot" | "ros2" | "ssh_docker"
     execution_language: Optional[str] = "python"        # Docker: python/javascript/java/csharp/go/rust
     additional_packages: Optional[List[str]] = None     # Docker: extra pip/npm packages
     docker_timeout: Optional[int] = 300                 # Docker: container timeout seconds
@@ -63,6 +64,7 @@ class StepConfig(BaseModel):
     # ROS2 Docker specific
     ros2_visual_count: Optional[int] = 0               # ROS2: number of tests to run with GUI visible
     ros2_timeout: Optional[int] = 120                  # ROS2: per-test timeout in seconds
+    remote_timeout: Optional[int] = 300                # SSH/Docker ROS2: per-test timeout in seconds
 
     # Test Reporting specific
     analysis_depth: Optional[str] = "detailed"

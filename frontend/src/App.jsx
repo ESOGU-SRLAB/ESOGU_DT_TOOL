@@ -80,13 +80,14 @@ function AppContents() {
 	// Global pipeline model — single model used for all pipeline steps
 	const [pipelineModel, setPipelineModel] = useState('qwen2.5-7b-instruct-1m');
 
-	// Test Execution Method (pipeline) — "ai" | "docker" | "robot" | "ros2"
+	// Test Execution Method (pipeline) — "ai" | "docker" | "robot" | "ros2" | "ssh_docker"
 	const [testExecutionMethod, setTestExecutionMethod] = useState('ai');
 	const [dockerAvailable, setDockerAvailable] = useState(false);
 	const [dockerConfig, setDockerConfig] = useState({ language: 'python', packages: '', timeout: 300 });
 	const [robotConfig, setRobotConfig] = useState({ robotType: 'generic', simulationPrecision: 'medium' });
 	const [ros2Available, setRos2Available] = useState(false);
 	const [ros2Config, setRos2Config] = useState({ visualCount: 0, timeout: 120 });
+	const [remoteRos2Config, setRemoteRos2Config] = useState({ timeout: 300 });
 	const [ros2ContainerName, setRos2ContainerName] = useState('');
 
 	const handleDockerConfigChange = (field, value) => {
@@ -94,6 +95,9 @@ function AppContents() {
 	};
 	const handleRobotConfigChange = (field, value) => {
 		setRobotConfig(prev => ({ ...prev, [field]: value }));
+	};
+	const handleRemoteRos2ConfigChange = (field, value) => {
+		setRemoteRos2Config(prev => ({ ...prev, [field]: value }));
 	};
 	const handleRos2ConfigChange = (field, value) => {
 		setRos2Config(prev => ({ ...prev, [field]: value }));
@@ -103,7 +107,7 @@ function AppContents() {
 	useEffect(() => {
 		const checkDocker = async () => {
 			try {
-				const res = await fetch('http://localhost:8000/api/docker-execution/status');
+				const res = await fetch('/api/docker-execution/status');
 				if (res.ok) {
 					const data = await res.json();
 					setDockerAvailable(!!data.docker_available);
@@ -119,7 +123,7 @@ function AppContents() {
 	useEffect(() => {
 		const checkRos2 = async () => {
 			try {
-				const res = await fetch('http://localhost:8000/api/ros2-execution/status');
+				const res = await fetch('/api/ros2-execution/status');
 				if (res.ok) {
 					const data = await res.json();
 					setRos2Available(!!data.available);
@@ -733,6 +737,8 @@ function AppContents() {
 				} else if (testExecutionMethod === 'ros2') {
 					execCfg.ros2_visual_count = ros2Config.visualCount ?? 0;
 					execCfg.ros2_timeout = ros2Config.timeout ?? 120;
+				} else if (testExecutionMethod === 'ssh_docker') {
+					execCfg.remote_timeout = remoteRos2Config.timeout ?? 300;
 				}
 				stepConfigs[stepId] = execCfg;
 			} else {
@@ -759,7 +765,7 @@ function AppContents() {
 
 		try {
 			// Start pipeline on backend
-			const startResp = await fetch('http://localhost:8000/api/pipeline/run', {
+			const startResp = await fetch('/api/pipeline/run', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(payload),
@@ -788,7 +794,7 @@ function AppContents() {
 		// Connect to SSE stream
 		try {
 			const evtSource = new EventSource(
-				`http://localhost:8000/api/pipeline/stream/${pipelineSessionId}`
+				`/api/pipeline/stream/${pipelineSessionId}`
 			);
 
 			evtSource.onmessage = (event) => {
@@ -807,7 +813,7 @@ function AppContents() {
 							(async () => {
 								try {
 									const res = await fetch(
-										`http://localhost:8000/api/pipeline/step-result/${pipelineSessionId}/${data.step_id}`
+										`/api/pipeline/step-result/${pipelineSessionId}/${data.step_id}`
 									);
 									if (res.ok) {
 										const stepData = await res.json();
@@ -1308,6 +1314,8 @@ function AppContents() {
 					ros2Config={ros2Config}
 					onRos2ConfigChange={handleRos2ConfigChange}
 					ros2ContainerName={ros2ContainerName}
+					remoteRos2Config={remoteRos2Config}
+					onRemoteRos2ConfigChange={handleRemoteRos2ConfigChange}
 					aiModels={aiModels}
 					environmentNames={environmentNames}
 					outputFormats={outputFormats}
