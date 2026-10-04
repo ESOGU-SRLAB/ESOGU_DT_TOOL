@@ -146,7 +146,7 @@ function AppContents() {
 	}, []);
 
 	// Combined file upload function that supports both direct and centralized file management
-	const handleFileUpload = async (processIdOrFiles, fileTypeOrInfo) => {
+	const handleFileUpload = async (processIdOrFiles, fileTypeOrInfo, uploadOptions = {}) => {
 		console.log('[App] File upload triggered');
 		
 		if (Array.isArray(processIdOrFiles)) {
@@ -158,15 +158,17 @@ function AppContents() {
 				// Read file contents asynchronously
 				const newFiles = await Promise.all(Array.from(files).map(async (file) => {
 					const content = await readFileContent(file);
-					console.log(`[App] File content read for ${file.name}:`, {
-						name: file.name,
+					const relativePath = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+					console.log(`[App] File content read for ${relativePath}:`, {
+						name: relativePath,
 						size: file.size,
 						contentLength: content.length,
 						contentPreview: content.substring(0, 100) + '...'
 					});
 					return {
 						id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-						name: file.name,
+						name: relativePath,
+						relativePath,
 						type: fileType || file.type,
 						size: file.size,
 						file: file, // Orijinal File nesnesini sakla
@@ -176,6 +178,15 @@ function AppContents() {
 				}));
 	
 				setManagedFiles(prev => [...prev, ...newFiles]);
+				if (uploadOptions.autoMapProcesses?.length > 0) {
+					setFileProcessMappings(prev => {
+						const next = { ...prev };
+						newFiles.forEach(fileInfo => {
+							next[fileInfo.id] = [...uploadOptions.autoMapProcesses];
+						});
+						return next;
+					});
+				}
 			} catch (error) {
 				console.error('File upload error:', error);
 				setValidationError('An error occurred while uploading the file');

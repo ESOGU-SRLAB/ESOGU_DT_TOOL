@@ -35,7 +35,9 @@ def is_project_structure_file(name: str, file_type: Optional[str] = None) -> boo
 
 def _module_name(path: str) -> str:
     normalized = (path or "unknown.py").replace("\\", "/")
-    if normalized.endswith(".py"):
+    if normalized.endswith(".pyi"):
+        normalized = normalized[:-4]
+    elif normalized.endswith(".py"):
         normalized = normalized[:-3]
     parts = [part for part in normalized.split("/") if part and part != "__init__"]
     return ".".join(parts) or "__init__"
@@ -162,17 +164,34 @@ def _analyze_python_file(name: str, content: str) -> Dict[str, Any]:
 
 
 def build_project_structure(files: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    files = list(files)
     analyzed: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
     symbol_index: List[str] = []
 
+    normalized_paths = [
+        str(item.get("name") or "unknown").replace("\\", "/") for item in files
+    ]
+    roots = {
+        path.split("/", 1)[0] for path in normalized_paths if "/" in path
+    }
+    project_root = next(iter(roots)) if len(roots) == 1 and all("/" in path for path in normalized_paths) else ""
+
     for item in files:
         name = str(item.get("name") or "unknown")
         content = item.get("content") or ""
-        if not isinstance(content, str) or not name.lower().endswith(".py"):
+        if not isinstance(content, str) or not name.lower().endswith((".py", ".pyi")):
             continue
         try:
-            file_data = _analyze_python_file(name, content)
+            normalized_name = name.replace("\\", "/")
+            module_path = (
+                normalized_name.split("/", 1)[1]
+                if project_root and normalized_name.startswith(f"{project_root}/")
+                else normalized_name
+            )
+            file_data = _analyze_python_file(module_path, content)
+            file_data["path"] = normalized_name
+            file_data["relative_path"] = module_path
             analyzed.append(file_data)
             module = file_data["module"]
             symbol_index.extend(f"{module}.{fn['name']}" for fn in file_data["functions"])
@@ -188,6 +207,7 @@ def build_project_structure(files: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "schema_version": PROJECT_AST_SCHEMA,
         "language": "python" if analyzed else "unknown",
         "source": "generated",
+        "project_root": project_root,
         "files": analyzed,
         "symbol_index": sorted(set(symbol_index)),
         "parse_errors": errors,
@@ -284,7 +304,9 @@ def validate_code_against_project_structure(
         matching_module = next(
             (
                 module for module in project_modules
-                if node.module == module or node.module.endswith(f".{module}")
+                if node.module == module
+                or node.module.endswith(f".{module}")
+                or module.endswith(f".{node.module}")
             ),
             None,
         )

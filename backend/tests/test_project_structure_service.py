@@ -28,7 +28,7 @@ def create_controller(speed: float = 0.2) -> RobotController:
 
 
 def test_build_project_structure_extracts_importable_symbols_and_signatures():
-    manifest = build_project_structure([{"name": "robot/controller.py", "content": SOURCE}])
+    manifest = build_project_structure([{"name": "controller.py", "content": SOURCE}])
 
     assert manifest["schema_version"] == PROJECT_AST_SCHEMA
     assert manifest["summary"] == {
@@ -38,8 +38,8 @@ def test_build_project_structure_extracts_importable_symbols_and_signatures():
         "functions": 1,
         "methods": 2,
     }
-    assert "robot.controller.RobotController.move_home" in manifest["symbol_index"]
-    assert "robot.controller.create_controller" in manifest["symbol_index"]
+    assert "controller.RobotController.move_home" in manifest["symbol_index"]
+    assert "controller.create_controller" in manifest["symbol_index"]
     assert manifest["files"][0]["functions"][0]["signature"].startswith("(speed: float")
 
 
@@ -78,3 +78,18 @@ def test_robot():
 """
 
     assert validate_code_against_project_structure(valid, manifest) == []
+
+
+def test_folder_import_paths_preserve_packages_but_strip_selected_root():
+    manifest = build_project_structure([
+        {"name": "robot_project/robot/__init__.py", "content": ""},
+        {"name": "robot_project/robot/controller.py", "content": SOURCE},
+        {"name": "robot_project/robot/types.pyi", "content": "def speed_limit() -> float: ..."},
+    ])
+
+    assert manifest["project_root"] == "robot_project"
+    modules = {item["module"] for item in manifest["files"]}
+    assert modules == {"robot", "robot.controller", "robot.types"}
+    controller = next(item for item in manifest["files"] if item["module"] == "robot.controller")
+    assert controller["path"] == "robot_project/robot/controller.py"
+    assert controller["relative_path"] == "robot/controller.py"

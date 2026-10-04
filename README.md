@@ -957,6 +957,14 @@ generation. Generated Python is checked against project imports and inferred
 class-method calls; an undeclared project symbol triggers the existing one-shot
 repair prompt and remains ineligible for execution if the repair still fails.
 
+The Files tab also provides **Select Project Folder**. Folder import preserves
+relative paths, marks supported files as `Source Code`, and automatically maps
+them to Scenario, Test Case, and Test Code Generation. Common dependency,
+environment, build, VCS, cache, coverage, and editor directories are ignored.
+For Python projects, the selected root directory is removed from importable
+module names while the original path remains in the manifest; `.py` and `.pyi`
+files therefore contribute a whole-project package-aware AST.
+
 ## Monitoring Integration
 
 STLC publishes consumer-neutral lifecycle telemetry from the existing pipeline
