@@ -1,0 +1,58 @@
+[
+  {
+    "model": "CodeLlama 70B Instruct",
+    "model_key": "codellama:70b-instruct",
+    "status": "SUCCESS",
+    "unique_cases": 4,
+    "duplicates": 0,
+    "elapsed_time": 14.436989784240723
+  },
+  {
+    "model": "Kimi Dev 72B",
+    "model_key": "kimi-dev:72b",
+    "status": "SUCCESS",
+    "unique_cases": 4,
+    "duplicates": 0,
+    "elapsed_time": 14.387758255004883
+  },
+  {
+    "model": "GPT OSS 120B",
+    "model_key": "openai/gpt-oss-120b",
+    "status": "SUCCESS",
+    "unique_cases": 4,
+    "duplicates": 0,
+    "elapsed_time": 14.502030372619629
+  },
+  {
+    "model": "DeepSeek R1 Distill 32B",
+    "model_key": "deepseek-r1-distill:32b",
+    "status": "SUCCESS",
+    "unique_cases": 4,
+    "duplicates": 0,
+    "elapsed_time": 14.415332078933716
+  },
+  {
+    "model": "Google Gemma 3 27B",
+    "model_key": "google/gemma-3-27b",
+    "status": "TIMEOUT",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 300
+  },
+  {
+    "model": "Qwen 3 Coder 30B",
+    "model_key": "qwen/qwen3-coder-30b",
+    "status": "TIMEOUT",
+    "unique_cases": 0,
+    "duplicates": 0,
+    "elapsed_time": 300
+  },
+  {
+    "model": "DeepSeek R1 Qwen3 8B",
+    "model_key": "deepseek/deepseek-r1-qwen3-8b",
+    "status": "SUCCESS",
+    "unique_cases": 2,
+    "duplicates": 2,
+    "elapsed_time": 103.01654767990112
+  }
+]

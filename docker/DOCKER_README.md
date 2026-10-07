@@ -1,5 +1,9 @@
 # 🐳 ROS2 Docker Container - Windows Kullanım Rehberi
 
+> **Deprecated optional local executor:** This directory documents the legacy
+> local ROS 2 execution routes. It is not used by the STLC backend Dockerfile,
+> Compose stack, headless generation API, or remote `ExecutionAdapter`.
+
 Bu rehber, colcon_ws workspace'inizi Docker container'da Windows'ta çalıştırmanız için hazırlanmıştır.
 
 ## 📋 Gereksinimler

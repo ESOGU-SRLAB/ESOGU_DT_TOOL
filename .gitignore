@@ -189,5 +189,11 @@ secrets.json
 *.p12
 *.pfx
 
+# External HIL/executor checkout; deployed and versioned independently.
+/ESOGU-HILTest-DualRobot-2/
+
+# External monitoring application checkout; versioned independently.
+/Cloud-Based-Digital-Twin-Monitoring/
+
 # Git attributes file
 .gitattributes

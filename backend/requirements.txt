@@ -5,8 +5,11 @@
 
 fastapi
 uvicorn
+python-multipart
 pymongo
 langchain
+langchain-openai
+langchain-text-splitters
 PyPDF2
 python-docx
 python-dotenv
@@ -18,3 +21,4 @@ aiohttp
 motor
 docker
 tiktoken
+paramiko

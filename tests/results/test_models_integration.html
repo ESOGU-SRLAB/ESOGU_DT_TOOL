@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Models Integration Test</title>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .model-item { margin: 5px 0; padding: 8px; background: #f8f9fa; border-radius: 3px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0056b3; }
+        #results { margin-top: 20px; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Models Integration Test</h1>
+        <p>Bu test sayfası merkezi model yönetim sisteminin çalışıp çalışmadığını kontrol eder.</p>
+        
+        <div class="section">
+            <h2>Backend API Test</h2>
+            <button onclick="testBackendAPI()">Test Backend Models API</button>
+            <button onclick="testSpecificEndpoints()">Test Specific Endpoints</button>
+        </div>
+
+        <div class="section">
+            <h2>Frontend Integration Test</h2>
+            <button onclick="testFrontendHook()">Test useModels Hook</button>
+            <button onclick="testModelFiltering()">Test Model Filtering</button>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const resultsDiv = document.getElementById('results');
+
+        function addResult(title, content, isSuccess = true) {
+            const section = document.createElement('div');
+            section.className = `section ${isSuccess ? 'success' : 'error'}`;
+            section.innerHTML = `
+                <h3>${title}</h3>
+                <pre>${typeof content === 'object' ? JSON.stringify(content, null, 2) : content}</pre>
+            `;
+            resultsDiv.appendChild(section);
+        }
+
+        async function testBackendAPI() {
+            try {
+                addResult('ℹ️ Testing Backend API', 'Requesting all models...');
+                
+                const response = await axios.get(`${API_BASE}/api/models`);
+                
+                if (response.data && response.data.models) {
+                    addResult('✅ Backend API Success', `
+Found ${response.data.models.length} models:
+${response.data.models.map(m => `- ${m.name} (${m.key})`).join('\n')}
+
+First few models:
+${JSON.stringify(response.data.models.slice(0, 3), null, 2)}
+                    `);
+                } else {
+                    addResult('❌ Backend API Error', 'Invalid response format', false);
+                }
+            } catch (error) {
+                addResult('❌ Backend API Error', `
+Error: ${error.message}
+${error.response ? `Status: ${error.response.status}` : ''}
+${error.response ? `Data: ${JSON.stringify(error.response.data, null, 2)}` : ''}
+                `, false);
+            }
+        }
+
+        async function testSpecificEndpoints() {
+            const endpoints = [
+                '/api/models?category=local',
+                '/api/models?type=instruction',
+                '/api/models/codegeex4:9b',
+                '/api/models/descriptions'
+            ];
+
+            for (const endpoint of endpoints) {
+                try {
+                    addResult(`ℹ️ Testing: ${endpoint}`, 'Making request...');
+                    
+                    const response = await axios.get(`${API_BASE}${endpoint}`);
+                    addResult(`✅ ${endpoint}`, response.data);
+                } catch (error) {
+                    addResult(`❌ ${endpoint}`, `
+Error: ${error.message}
+${error.response ? `Status: ${error.response.status}` : ''}
+                    `, false);
+                }
+            }
+        }
+
+        // Simulated useModels hook test
+        async function testFrontendHook() {
+            try {
+                addResult('ℹ️ Testing Frontend Hook', 'Simulating useModels hook behavior...');
+                
+                // Simulate the hook's fetch behavior
+                const response = await axios.get(`${API_BASE}/api/models`, {
+                    params: {
+                        autoFetch: true,
+                        includeDescriptions: true
+                    }
+                });
+
+                if (response.data && response.data.models) {
+                    const models = response.data.models;
+                    const descriptions = response.data.descriptions || {};
+                    
+                    addResult('✅ Frontend Hook Simulation', `
+Hook would return:
+- models: ${models.length} items
+- loading: false
+- error: null
+- getModelDescriptions: function
+
+Sample model:
+${JSON.stringify(models[0], null, 2)}
+
+Sample description:
+${descriptions[models[0]?.key] || 'No description available'}
+                    `);
+                } else {
+                    addResult('❌ Frontend Hook Error', 'Invalid response format', false);
+                }
+            } catch (error) {
+                addResult('❌ Frontend Hook Error', `
+Error: ${error.message}
+Hook would return:
+- models: []
+- loading: false  
+- error: "${error.message}"
+                `, false);
+            }
+        }
+
+        async function testModelFiltering() {
+            try {
+                addResult('ℹ️ Testing Model Filtering', 'Testing different filter combinations...');
+                
+                const tests = [
+                    { category: 'local', description: 'Local models only' },
+                    { type: 'instruction', description: 'Instruction models only' },
+                    { category: 'api', description: 'API models only' },
+                    { minSize: '7b', description: 'Models 7B and larger' }
+                ];
+
+                for (const test of tests) {
+                    try {
+                        const response = await axios.get(`${API_BASE}/api/models`, { params: test });
+                        addResult(`✅ Filter: ${test.description}`, `
+Found ${response.data.models.length} models:
+${response.data.models.map(m => `- ${m.name}`).join('\n')}
+                        `);
+                    } catch (error) {
+                        addResult(`❌ Filter: ${test.description}`, error.message, false);
+                    }
+                }
+            } catch (error) {
+                addResult('❌ Model Filtering Error', error.message, false);
+            }
+        }
+
+        // Auto-run basic test on page load
+        window.onload = function() {
+            addResult('🏁 Page Loaded', 'Ready to test models integration!');
+        };
+    </script>
+</body>
+</html>

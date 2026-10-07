@@ -276,7 +276,7 @@ IMPORTANT:
   const fetchProcessTitles = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://localhost:8000/api/test-case-optimization/process-titles-with-counts');
+      const response = await axios.get('/api/test-case-optimization/process-titles-with-counts');
       if (response.data.success) {
         setProcessTitles(response.data.data);
       }
@@ -290,7 +290,7 @@ IMPORTANT:
   const fetchTestCasesMultiple = async (processTitles) => {
     try {
       setLoading(true);
-      const response = await axios.post('http://localhost:8000/api/test-case-optimization/test-cases-multi-process', {
+      const response = await axios.post('/api/test-case-optimization/test-cases-multi-process', {
         process_titles: processTitles
       });
       if (response.data.success) {
@@ -438,7 +438,7 @@ IMPORTANT:
       
       console.log('📦 Full request data:', requestData);
 
-      const response = await axios.post('http://localhost:8000/api/test-case-optimization/smart-selection', requestData);
+      const response = await axios.post('/api/test-case-optimization/smart-selection', requestData);
 
       console.log('Smart selection response:', response.data);
 
@@ -505,7 +505,7 @@ IMPORTANT:
 
     try {
       console.log(`Attempting to stop process: ${currentProcessId}`);
-      const response = await axios.post(`http://localhost:8000/api/test-case-optimization/stop-process/${currentProcessId}`);
+      const response = await axios.post(`/api/test-case-optimization/stop-process/${currentProcessId}`);
       
       if (response.data.success) {
         console.log('Process stopped successfully');

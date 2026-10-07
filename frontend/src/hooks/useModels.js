@@ -12,7 +12,7 @@ import { useSelector } from 'react-redux';
 import { selectApiKeys, selectAllValidationStatus, selectApiKeySettings } from '../store/slices/apiKeySlice';
 
 // API base URL
-const API_BASE_URL = 'http://localhost:8000/api/models';
+const API_BASE_URL = '/api/models';
 
 /**
  * Merkezi model yönetimi hook'u

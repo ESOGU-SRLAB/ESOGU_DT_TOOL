@@ -1,7 +1,7 @@
 import requests
 import json
 
-r = requests.get('http://localhost:8000/openapi.json')
+r = requests.get('http://localhost:8100/openapi.json')
 data = r.json()
 paths = data.get('paths', {})
 

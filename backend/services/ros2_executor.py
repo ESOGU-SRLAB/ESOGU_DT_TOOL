@@ -3,7 +3,8 @@ ros2_executor.py
 ----------------
 ROS2 Docker execution service for STLC Manager.
 
-Connects to a running ros2_colcon_workspace:humble container via Docker exec
+Deprecated optional local execution path. Connects to an operator-configured
+ROS 2 container via Docker exec
 (no new containers are spawned). Test code is copied into the container as a
 Python script and executed with `python3`.  Supports two execution flavors:
 
@@ -24,7 +25,10 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Image name that identifies the ROS2 container
-ROS2_IMAGE_NAME = "stlc-robot-ros2:latest"
+ROS2_IMAGE_NAME = os.getenv("LEGACY_ROS2_IMAGE", "stlc-robot-ros2:latest")
+ROS2_SETUP_SCRIPT = os.getenv(
+    "LEGACY_ROS2_SETUP_SCRIPT", "/opt/stlc_ros/install/setup.bash"
+)
 
 
 class ROS2Executor:
@@ -141,7 +145,7 @@ class ROS2Executor:
             "bash", "-c",
             (
                 "source /opt/ros/humble/setup.bash 2>/dev/null || true && "
-                "source /root/colcon_ws/install/setup.bash 2>/dev/null || true && "
+                f"source {ROS2_SETUP_SCRIPT} 2>/dev/null || true && "
                 f"python3 {remote_path}"
             )
         ]

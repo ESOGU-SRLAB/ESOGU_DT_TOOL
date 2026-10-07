@@ -7,7 +7,7 @@ Write-Host ""
 # Backend Check
 Write-Host "Backend Status..." -ForegroundColor Yellow
 try {
-    $null = Invoke-WebRequest -Uri "http://localhost:8000/docs" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+    $null = Invoke-WebRequest -Uri "http://localhost:8100/docs" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
     Write-Host "  OK - Backend running (port 8000)" -ForegroundColor Green
 } catch {
     Write-Host "  FAIL - Backend not running" -ForegroundColor Red
@@ -16,7 +16,7 @@ try {
 # Frontend Check
 Write-Host "Frontend Status..." -ForegroundColor Yellow
 try {
-    $null = Invoke-WebRequest -Uri "http://localhost:5173" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+    $null = Invoke-WebRequest -Uri "http://localhost:5175" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
     Write-Host "  OK - Frontend running (port 5173)" -ForegroundColor Green
 } catch {
     Write-Host "  FAIL - Frontend not running" -ForegroundColor Red
@@ -54,7 +54,7 @@ Write-Host "===============================" -ForegroundColor Cyan
 Write-Host " Next Steps                    " -ForegroundColor Cyan
 Write-Host "===============================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "UI: http://localhost:5173" -ForegroundColor Cyan
-Write-Host "API Docs: http://localhost:8000/docs" -ForegroundColor Cyan
+Write-Host "UI: http://localhost:5175" -ForegroundColor Cyan
+Write-Host "API Docs: http://localhost:8100/docs" -ForegroundColor Cyan
 Write-Host "Read UI_TEST_GUIDE.md for detailed instructions" -ForegroundColor Yellow
 Write-Host ""

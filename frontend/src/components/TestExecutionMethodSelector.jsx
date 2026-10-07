@@ -9,7 +9,7 @@ import { BeakerIcon } from '@heroicons/react/24/outline';
  * GlobalAIConfig ile aynı kart pattern'ini kullanır.
  *
  * Props:
- *   method              {string}   "ai" | "docker" | "robot" | "ros2"
+ *   method              {string}   "ai" | "docker" | "robot" | "ros2" | "ssh_docker"
  *   onMethodChange      {fn}       (newMethod: string) => void
  *   dockerAvailable     {boolean}  Docker Engine çalışıyor mu?
  *   dockerConfig        {object}   { language, packages, timeout }
@@ -34,6 +34,8 @@ export default function TestExecutionMethodSelector({
   ros2Config = { visualCount: 0, timeout: 120 },
   onRos2ConfigChange,
   ros2ContainerName = '',
+  remoteRos2Config = { timeout: 300 },
+  onRemoteRos2ConfigChange,
   selectedProcesses,
 }) {
   // test-execution adımı seçili değilse hiç render etme
@@ -79,6 +81,15 @@ export default function TestExecutionMethodSelector({
       description: 'Run tests inside ros2_colcon_workspace:humble container',
       disabled: !ros2Available,
       tooltip: !ros2Available ? 'ROS2 container is not running. Start it first (README_Docker.md Step 4).' : null,
+    },
+    {
+      id: 'ssh_docker',
+      label: '🌐 Remote ROS2',
+      icon: '',
+      activeColor: 'text-cyan-700',
+      description: 'Transfer generated Python tests with SCP and run the remote ROS2 harness over SSH',
+      disabled: false,
+      tooltip: 'Requires server-side SSH_EXECUTION_HOST and SSH key configuration.',
     },
   ];
 
@@ -323,6 +334,29 @@ export default function TestExecutionMethodSelector({
                   className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                 />
               </div>
+            </div>
+          </div>
+        )}
+        {method === 'ssh_docker' && (
+          <div className="mt-2 space-y-3">
+            <div className="p-3 bg-cyan-50 rounded-lg text-xs text-cyan-700 border border-cyan-100">
+              <p className="font-medium mb-1">Remote ROS2 Harness</p>
+              <p className="text-cyan-600 leading-relaxed">
+                Generated Python tests are copied to the configured robot computer with SCP and executed in
+                <code className="bg-cyan-100 px-1 rounded"> ros2-exec-harness:0.3.2</code> over SSH.
+                SSH host, key, target directory, and image are configured on the backend.
+              </p>
+            </div>
+            <div className="max-w-xs">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Timeout / test (s)</label>
+              <input
+                type="number"
+                min={10}
+                max={1900}
+                value={remoteRos2Config.timeout ?? 300}
+                onChange={e => onRemoteRos2ConfigChange?.('timeout', parseInt(e.target.value, 10) || 300)}
+                className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+              />
             </div>
           </div>
         )}

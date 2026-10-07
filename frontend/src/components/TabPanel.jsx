@@ -70,6 +70,8 @@ export default function TabPanel({
   ros2Config = { visualCount: 0, timeout: 120 },
   onRos2ConfigChange,
   ros2ContainerName = '',
+  remoteRos2Config = { timeout: 300 },
+  onRemoteRos2ConfigChange,
 }) {
   const [editingPrompt, setEditingPrompt] = useState(null);
   const [tempPrompt, setTempPrompt] = useState('');
@@ -267,19 +269,19 @@ export default function TabPanel({
           activeTab === 'test-reporting' || activeTab === 'test-closure') {
         let endpoint;
         if (activeTab === 'code-review') {
-          endpoint = 'http://localhost:8000/api/prompts/code-review';
+          endpoint = '/api/prompts/code-review';
         } else if (activeTab === 'requirement-analysis') {
-          endpoint = 'http://localhost:8000/api/prompts/requirement-analysis';
+          endpoint = '/api/prompts/requirement-analysis';
         } else if (activeTab === 'test-planning') {
-          endpoint = 'http://localhost:8000/api/prompts/test-planning';
+          endpoint = '/api/prompts/test-planning';
         } else if (activeTab === 'environment-setup') {
-          endpoint = 'http://localhost:8000/api/prompts/environment-setup';
+          endpoint = '/api/prompts/environment-setup';
         } else if (activeTab === 'test-execution') {
-          endpoint = 'http://localhost:8000/api/prompts/test-execution';
+          endpoint = '/api/prompts/test-execution';
         } else if (activeTab === 'test-reporting') {
-          endpoint = 'http://localhost:8000/api/prompts/test-reporting';
+          endpoint = '/api/prompts/test-reporting';
         } else if (activeTab === 'test-closure') {
-          endpoint = 'http://localhost:8000/api/prompts/test-closure';
+          endpoint = '/api/prompts/test-closure';
         }
         
         fetch(endpoint)
@@ -298,7 +300,7 @@ export default function TabPanel({
           });
       } else {
         // Diğer süreçler için eski mantık
-        fetch(`http://localhost:8000/api/prompts/${activeTab}`)
+        fetch(`/api/prompts/${activeTab}`)
           .then(res => res.json())
           .then(data => {
             // prompt_text varsa onu kullan, yoksa prompt'u kullan
@@ -342,15 +344,15 @@ export default function TabPanel({
       try {
         let endpoint;
         if (processId === 'code-review') {
-          endpoint = 'http://localhost:8000/api/prompts/code-review';
+          endpoint = '/api/prompts/code-review';
         } else if (processId === 'requirement-analysis') {
-          endpoint = 'http://localhost:8000/api/prompts/requirement-analysis';
+          endpoint = '/api/prompts/requirement-analysis';
         } else if (processId === 'test-planning') {
-          endpoint = 'http://localhost:8000/api/prompts/test-planning';
+          endpoint = '/api/prompts/test-planning';
         } else if (processId === 'environment-setup') {
-          endpoint = 'http://localhost:8000/api/prompts/environment-setup';
+          endpoint = '/api/prompts/environment-setup';
         } else if (processId === 'test-execution') {
-          endpoint = 'http://localhost:8000/api/prompts/test-execution';
+          endpoint = '/api/prompts/test-execution';
         }
         const response = await fetch(endpoint);
         if (!response.ok) {
@@ -368,7 +370,7 @@ export default function TabPanel({
     }
     // Diğer süreçler için eski mantık
     try {
-      const response = await fetch(`http://localhost:8000/api/prompts/${processId}`);
+      const response = await fetch(`/api/prompts/${processId}`);
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText || 'Base prompt fetch failed');
@@ -445,15 +447,15 @@ Important:
       try {
         let endpoint;
         if (processId === 'code-review') {
-          endpoint = 'http://localhost:8000/api/prompts/code-review';
+          endpoint = '/api/prompts/code-review';
         } else if (processId === 'requirement-analysis') {
-          endpoint = 'http://localhost:8000/api/prompts/requirement-analysis';
+          endpoint = '/api/prompts/requirement-analysis';
         } else if (processId === 'test-planning') {
-          endpoint = 'http://localhost:8000/api/prompts/test-planning';
+          endpoint = '/api/prompts/test-planning';
         } else if (processId === 'environment-setup') {
-          endpoint = 'http://localhost:8000/api/prompts/environment-setup';
+          endpoint = '/api/prompts/environment-setup';
         } else if (processId === 'test-execution') {
-          endpoint = 'http://localhost:8000/api/prompts/test-execution';
+          endpoint = '/api/prompts/test-execution';
         }
         const response = await fetch(endpoint);
         if (!response.ok) {
@@ -469,7 +471,7 @@ Important:
     }
     // Diğer süreçler için eski mantık
     try {
-      const response = await fetch(`http://localhost:8000/api/prompts/${processId}`);
+      const response = await fetch(`/api/prompts/${processId}`);
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText || 'Base prompt fetch failed');
@@ -664,6 +666,8 @@ Important:
               ros2Config={ros2Config}
               onRos2ConfigChange={onRos2ConfigChange}
               ros2ContainerName={ros2ContainerName}
+              remoteRos2Config={remoteRos2Config}
+              onRemoteRos2ConfigChange={onRemoteRos2ConfigChange}
               selectedProcesses={selectedProcesses}
             />
           </div>
@@ -998,6 +1002,8 @@ Important:
                   ros2Config={ros2Config}
                   onRos2ConfigChange={onRos2ConfigChange}
                   ros2ContainerName={ros2ContainerName}
+                  remoteRos2Config={remoteRos2Config}
+                  onRemoteRos2ConfigChange={onRemoteRos2ConfigChange}
                   selectedProcesses={selectedProcesses}
                 />
 

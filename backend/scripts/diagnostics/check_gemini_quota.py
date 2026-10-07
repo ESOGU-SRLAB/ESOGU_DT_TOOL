@@ -15,7 +15,7 @@ def check_quota(api_key: str):
     print("🔍 GEMINI API QUOTA CHECKER")
     print("="*80)
     print(f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"🔑 API Key: {api_key[:10]}...{api_key[-5:]}")
+    print("🔑 API key configured")
     print("="*80)
     
     # Test 1: Simple API call

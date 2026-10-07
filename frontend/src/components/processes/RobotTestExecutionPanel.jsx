@@ -95,7 +95,7 @@ export default function RobotTestExecutionPanel({ sessionId, disabled = false })
   const checkDockerHealth = async () => {
     setIsCheckingDocker(true);
     try {
-      const response = await fetch('http://localhost:8000/api/robot-execution/health');
+      const response = await fetch('/api/robot-execution/health');
       const data = await response.json();
       setDockerAvailable(data.docker_available);
       if (!data.docker_available) {
@@ -116,7 +116,7 @@ export default function RobotTestExecutionPanel({ sessionId, disabled = false })
   const fetchProcessNames = async () => {
     try {
       // Use the new endpoint that returns process names with generated tests
-      const response = await fetch('http://localhost:8000/api/processes/test-code-generation/process-names');
+      const response = await fetch('/api/processes/test-code-generation/process-names');
       const data = await response.json();
       
       if (data.success && data.process_names) {
@@ -138,7 +138,7 @@ export default function RobotTestExecutionPanel({ sessionId, disabled = false })
     setIsLoadingTests(true);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/processes/test-code-generation/tests/${encodeURIComponent(processName)}`
+        `/api/processes/test-code-generation/tests/${encodeURIComponent(processName)}`
       );
       const data = await response.json();
 
@@ -231,7 +231,7 @@ export default function RobotTestExecutionPanel({ sessionId, disabled = false })
 
     try {
       // Start batch execution
-      const response = await fetch('http://localhost:8000/api/robot-execution/execute-batch', {
+      const response = await fetch('/api/robot-execution/execute-batch', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -273,7 +273,7 @@ export default function RobotTestExecutionPanel({ sessionId, disabled = false })
    */
   const pollProgress = async (sessionId) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/robot-execution/progress/${sessionId}`);
+      const response = await fetch(`/api/robot-execution/progress/${sessionId}`);
       const data = await response.json();
 
       setProgress(data);
@@ -306,7 +306,7 @@ export default function RobotTestExecutionPanel({ sessionId, disabled = false })
    */
   const fetchResults = async (sessionId) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/robot-execution/results/${sessionId}`);
+      const response = await fetch(`/api/robot-execution/results/${sessionId}`);
       const data = await response.json();
       setResults(data);
     } catch (error) {

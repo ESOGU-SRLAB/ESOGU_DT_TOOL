@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8000/api/processes';
+const API_BASE_URL = '/api/processes';
 
 export const processService = {
   async runProcess(processType, files) {
@@ -193,7 +193,7 @@ export const processService = {
     if (sessionId) formData.append('session_id', sessionId);
 
     try {
-      const response = await fetch('http://localhost:8000/api/processes/test-planning/run', {
+      const response = await fetch('/api/processes/test-planning/run', {
         method: 'POST',
         body: formData,
         headers: { 'Accept': 'application/json' }
@@ -234,7 +234,7 @@ export const processService = {
     if (sessionId) formData.append('session_id', sessionId);
 
     try {
-      const response = await fetch('http://localhost:8000/api/processes/environment-setup/run', {
+      const response = await fetch('/api/processes/environment-setup/run', {
         method: 'POST',
         body: formData,
         headers: { 'Accept': 'application/json' }
@@ -280,7 +280,7 @@ export const processService = {
       console.log('[ProcessService] Final prompt length:', data.finalPrompt?.length || 0);
       console.log('[ProcessService] Model:', data.model);
       
-      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/run', {
+      const response = await fetch('/api/processes/test-scenario-generation/run', {
         method: 'POST',
         body: formData,
         headers: {

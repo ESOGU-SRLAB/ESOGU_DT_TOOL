@@ -332,6 +332,13 @@ function renderTestCodeGeneration(output) {
             }`} />
             <span className="flex-1 truncate">{t.title || t.test_case_id || `Test ${i + 1}`}</span>
             {t.framework && <span className="text-xs text-gray-400">{t.framework}</span>}
+            {t.oracle && (
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                t.oracle.passed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+              }`}>
+                Oracle {t.oracle.score ?? 0}
+              </span>
+            )}
           </summary>
           <div className="bg-gray-900 text-gray-100 text-xs p-3 overflow-x-auto">
             <pre className="whitespace-pre-wrap font-mono">{t.code || t.test_code || '// No code available'}</pre>

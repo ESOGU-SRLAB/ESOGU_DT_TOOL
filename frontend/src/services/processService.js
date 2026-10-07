@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8000/api/processes';
+const API_BASE_URL = '/api/processes';
 
 export const processService = {
   async runProcess(processType, files) {
@@ -206,7 +206,7 @@ export const processService = {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/processes/test-planning/run', {
+      const response = await fetch('/api/processes/test-planning/run', {
         method: 'POST',
         body: formData,
         headers: { 'Accept': 'application/json' }
@@ -255,7 +255,7 @@ export const processService = {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/processes/environment-setup/run', {
+      const response = await fetch('/api/processes/environment-setup/run', {
         method: 'POST',
         body: formData,
         headers: { 'Accept': 'application/json' }
@@ -386,7 +386,7 @@ export const processService = {
     if (data instanceof FormData) {
       console.log('[ProcessService] Data is already FormData, using directly');
       try {
-        const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/run', {
+        const response = await fetch('/api/processes/test-scenario-generation/run', {
           method: 'POST',
           body: data,
           headers: {
@@ -428,6 +428,9 @@ export const processService = {
     if (data.sessionId) formData.append('session_id', data.sessionId);
     if (data.process_title) formData.append('process_title', data.process_title);
     if (data.apiKey) formData.append('api_key', data.apiKey);
+    if (data.projectAstFile) {
+      formData.append('project_ast_file', data.projectAstFile, data.projectAstFile.name);
+    }
 
     try {
       console.log('[ProcessService] Running test scenario generation with final prompt');
@@ -436,7 +439,7 @@ export const processService = {
       console.log('[ProcessService] Model:', data.model);
       console.log('[ProcessService] Process title:', data.process_title);
       
-      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/run', {
+      const response = await fetch('/api/processes/test-scenario-generation/run', {
         method: 'POST',
         body: formData,
         headers: {
@@ -464,7 +467,7 @@ export const processService = {
     try {
       console.log('[ProcessService] Generating test scenarios with data:', data);
       
-      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/generate-test-scenarios', {
+      const response = await fetch('/api/processes/test-scenario-generation/generate-test-scenarios', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

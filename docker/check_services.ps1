@@ -9,12 +9,12 @@ Write-Host ""
 # 1. Backend Kontrolü
 Write-Host "1️⃣  Backend kontrolü..." -ForegroundColor Yellow
 try {
-    $response = Invoke-WebRequest -Uri "http://localhost:8000/docs" -Method Get -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
-    Write-Host "   ✅ Backend çalışıyor (localhost:8000)" -ForegroundColor Green
+    $response = Invoke-WebRequest -Uri "http://localhost:8100/docs" -Method Get -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+    Write-Host "   ✅ Backend çalışıyor (localhost:8100)" -ForegroundColor Green
 } catch {
     Write-Host "   ❌ Backend çalışmıyor!" -ForegroundColor Red
     Write-Host "   ℹ️  Başlatmak için:" -ForegroundColor Yellow
-    Write-Host "      cd C:\Users\Cem\Desktop\STLC-Manager\backend" -ForegroundColor Gray
+    Write-Host "      cd <STLC-Manager>\backend" -ForegroundColor Gray
     Write-Host "      python -m uvicorn app:app --reload --host localhost --port 8000" -ForegroundColor Gray
 }
 Write-Host ""
@@ -22,12 +22,12 @@ Write-Host ""
 # 2. Frontend Kontrolü
 Write-Host "2️⃣  Frontend kontrolü..." -ForegroundColor Yellow
 try {
-    $response = Invoke-WebRequest -Uri "http://localhost:5173" -Method Get -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
-    Write-Host "   ✅ Frontend çalışıyor (localhost:5173)" -ForegroundColor Green
+    $response = Invoke-WebRequest -Uri "http://localhost:5175" -Method Get -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+    Write-Host "   ✅ Frontend çalışıyor (localhost:5175)" -ForegroundColor Green
 } catch {
     Write-Host "   ❌ Frontend çalışmıyor!" -ForegroundColor Red
     Write-Host "   ℹ️  Başlatmak için:" -ForegroundColor Yellow
-    Write-Host "      cd C:\Users\Cem\Desktop\STLC-Manager\frontend" -ForegroundColor Gray
+    Write-Host "      cd <STLC-Manager>\frontend" -ForegroundColor Gray
     Write-Host "      npm run dev" -ForegroundColor Gray
 }
 Write-Host ""
@@ -74,9 +74,9 @@ Write-Host "📋 Detaylı UI test rehberi için:" -ForegroundColor Yellow
 Write-Host "   UI_TEST_GUIDE.md dosyasını okuyun" -ForegroundColor Gray
 Write-Host ""
 Write-Host "🌐 UI'ya erişim:" -ForegroundColor Yellow
-Write-Host "   http://localhost:5173" -ForegroundColor Cyan
+Write-Host "   http://localhost:5175" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "📚 Backend API Docs:" -ForegroundColor Yellow
-Write-Host "   http://localhost:8000/docs" -ForegroundColor Cyan
+Write-Host "   http://localhost:8100/docs" -ForegroundColor Cyan
 Write-Host ""
 

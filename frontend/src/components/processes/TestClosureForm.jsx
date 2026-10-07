@@ -126,7 +126,7 @@ export default function TestClosureForm({ onComplete, onSetOutput, onSetFormStat
     setLoading(true);
     try {
       const response = await fetch(
-        'http://localhost:8000/api/test-closure/available-sessions'
+        '/api/test-closure/available-sessions'
       );
 
       if (!response.ok) {
@@ -269,7 +269,7 @@ export default function TestClosureForm({ onComplete, onSetOutput, onSetFormStat
     setMetrics(null);
 
     try {
-      const response = await fetch('http://localhost:8000/api/test-closure/metrics', {
+      const response = await fetch('/api/test-closure/metrics', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -316,7 +316,7 @@ export default function TestClosureForm({ onComplete, onSetOutput, onSetFormStat
     setPendingGeneration(shouldGenerateAfter);
 
     try {
-      const response = await fetch('http://localhost:8000/api/test-closure/preview-prompt', {
+      const response = await fetch('/api/test-closure/preview-prompt', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -438,11 +438,11 @@ This may take a few moments depending on the amount of data.`,
       };
       
       console.log('[TestClosure] Sending request to backend:');
-      console.log('  - Endpoint:', 'http://localhost:8000/api/test-closure/generate-report');
+      console.log('  - Endpoint:', '/api/test-closure/generate-report');
       console.log('  - Selected Model:', selectedModel);
       console.log('  - Using Custom Prompt:', !!requestBody.custom_prompt);
       
-      const response = await fetch('http://localhost:8000/api/test-closure/generate-report', {
+      const response = await fetch('/api/test-closure/generate-report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -2,7 +2,7 @@ import { createSlice, createAsyncThunk, createSelector } from '@reduxjs/toolkit'
 import axios from 'axios';
 
 // API base URL
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = '';
 
 // Async thunk for validating Google API key
 export const validateGoogleApiKey = createAsyncThunk(

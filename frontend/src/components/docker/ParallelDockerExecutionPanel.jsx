@@ -75,7 +75,7 @@ export default function ParallelDockerExecutionPanel({
     }
     
     try {
-      const response = await fetch('http://localhost:8000/api/docker-execution/parallel/execute', {
+      const response = await fetch('/api/docker-execution/parallel/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -125,7 +125,7 @@ export default function ParallelDockerExecutionPanel({
     const interval = setInterval(async () => {
       try {
         const response = await fetch(
-          `http://localhost:8000/api/docker-execution/parallel/progress/${sessionId}`
+          `/api/docker-execution/parallel/progress/${sessionId}`
         );
         const data = await response.json();
         
@@ -153,7 +153,7 @@ export default function ParallelDockerExecutionPanel({
   const fetchResults = async (sessionId) => {
     try {
       const response = await fetch(
-        `http://localhost:8000/api/docker-execution/parallel/results/${sessionId}`
+        `/api/docker-execution/parallel/results/${sessionId}`
       );
       const data = await response.json();
       
@@ -214,7 +214,7 @@ ${stats.failed === 0
     
     try {
       await fetch(
-        `http://localhost:8000/api/docker-execution/parallel/cancel/${sessionId}`,
+        `/api/docker-execution/parallel/cancel/${sessionId}`,
         { method: 'POST' }
       );
       

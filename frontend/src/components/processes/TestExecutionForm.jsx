@@ -123,7 +123,7 @@ export default function TestExecutionForm({
 
     setIsLoadingRecords(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/test-execution/process/${encodeURIComponent(processName)}/records`);
+      const response = await fetch(`/api/test-execution/process/${encodeURIComponent(processName)}/records`);
       const data = await response.json();
 
       if (data.success) {
@@ -150,7 +150,7 @@ export default function TestExecutionForm({
 
     setIsLoadingTests(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/test-execution/process/${encodeURIComponent(processName)}/individual-tests`);
+      const response = await fetch(`/api/test-execution/process/${encodeURIComponent(processName)}/individual-tests`);
       const data = await response.json();
 
       if (data.success) {
@@ -192,6 +192,14 @@ export default function TestExecutionForm({
 
   // Handle individual test selection
   const handleTestSelection = (testId, isSelected) => {
+    const test = individualTests.find(item => item.test_id === testId);
+    if (isSelected && test && (
+      (test.execution_eligibility || 'eligible') !== 'eligible'
+      || test.oracle?.passed === false
+    )) {
+      toast.error(test.eligibility_reason || 'This test is not eligible for execution');
+      return;
+    }
     setSelectedTests(prev => {
       const newSelection = isSelected 
         ? [...prev, testId]
@@ -204,7 +212,12 @@ export default function TestExecutionForm({
   // Handle select all tests
   const handleSelectAllTests = (selectAll) => {
     if (selectAll) {
-      setSelectedTests(individualTests.map(test => test.test_id));
+      setSelectedTests(individualTests
+        .filter(test => (
+          (test.execution_eligibility || 'eligible') === 'eligible'
+          && test.oracle?.passed !== false
+        ))
+        .map(test => test.test_id));
     } else {
       setSelectedTests([]);
     }
@@ -213,7 +226,7 @@ export default function TestExecutionForm({
   // Check MCP status
   const checkMcpStatus = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/test-execution/mcp/status');
+      const response = await fetch('/api/test-execution/mcp/status');
       const data = await response.json();
       setMcpStatus(data);
     } catch (error) {
@@ -225,7 +238,7 @@ export default function TestExecutionForm({
   // Fetch available process names
   const fetchProcessNames = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/test-execution/process-names');
+      const response = await fetch('/api/test-execution/process-names');
       const data = await response.json();
       setAvailableProcessNames(data.process_names || []);
     } catch (error) {
@@ -237,7 +250,7 @@ export default function TestExecutionForm({
   // Check Docker status
   const checkDockerStatus = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/docker-execution/status');
+      const response = await fetch('/api/docker-execution/status');
       const data = await response.json();
       setDockerAvailable(data.docker_available);
     } catch (error) {
@@ -287,7 +300,7 @@ export default function TestExecutionForm({
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/docker-execution/execute-from-process', {
+      const response = await fetch('/api/docker-execution/execute-from-process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -424,7 +437,7 @@ This ensures reliable execution even with many tests.
         model: selectedModel,
         ...(apiKey ? { api_key: apiKey } : {})
       };
-      const endpoint = 'http://localhost:8000/api/test-execution/execute-selected-tests';
+      const endpoint = '/api/test-execution/execute-selected-tests';
 
       console.log('[TestExecution] Sending request:', {
         endpoint,
@@ -638,7 +651,7 @@ ${result.error || 'Unknown error occurred'}
       
       const errorOutput = {
         status: 'error',
-        content: `❌ Connection Error\n\n🔴 **Network Error:**\n${error.message}\n\nPlease ensure the backend services are running:\n- Main Backend: http://localhost:8000\n- MCP Server: http://localhost:8001`,
+        content: `❌ Connection Error\n\n🔴 **Network Error:**\n${error.message}\n\nPlease ensure the backend services are running:\n- Main Backend: /api via Vite proxy (http://localhost:8100)\n- MCP Server: http://localhost:8001`,
         timestamp: new Date().toISOString(),
         model: selectedModel,
         processType: 'Test Execution'
@@ -1026,12 +1039,18 @@ ${result.error || 'Unknown error occurred'}
                     <label className="flex items-center">
                       <input
                         type="checkbox"
-                        checked={selectedTests.length === individualTests.length}
+                        checked={selectedTests.length > 0 && selectedTests.length === individualTests.filter(test => (
+                          (test.execution_eligibility || 'eligible') === 'eligible'
+                          && test.oracle?.passed !== false
+                        )).length}
                         onChange={(e) => handleSelectAllTests(e.target.checked)}
                         className="mr-2 rounded"
                       />
                       <span className="text-sm font-medium text-gray-700">
-                        Select All ({individualTests.length} tests)
+                        Select All ({individualTests.filter(test => (
+                          (test.execution_eligibility || 'eligible') === 'eligible'
+                          && test.oracle?.passed !== false
+                        )).length} executable / {individualTests.length} total)
                       </span>
                     </label>
                     <div className="flex items-center space-x-2">
@@ -1082,21 +1101,26 @@ ${result.error || 'Unknown error occurred'}
               {/* Individual Tests List */}
               {!isLoadingTests && individualTests.length > 0 && (
                 <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {individualTests.map((test, index) => (
+                  {individualTests.map((test, index) => {
+                    const isEligible = (test.execution_eligibility || 'eligible') === 'eligible'
+                      && test.oracle?.passed !== false;
+                    return (
                     <div
                       key={test.test_id}
                       className={clsx(
-                        'p-3 border rounded-lg cursor-pointer transition-colors',
+                        'p-3 border rounded-lg transition-colors',
+                        isEligible ? 'cursor-pointer' : 'cursor-not-allowed opacity-70 bg-gray-50',
                         selectedTests.includes(test.test_id)
                           ? 'border-indigo-300 bg-indigo-50'
                           : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                       )}
-                      onClick={() => handleTestSelection(test.test_id, !selectedTests.includes(test.test_id))}
+                      onClick={() => isEligible && handleTestSelection(test.test_id, !selectedTests.includes(test.test_id))}
                     >
                       <div className="flex items-start space-x-3">
                         <input
                           type="checkbox"
                           checked={selectedTests.includes(test.test_id)}
+                          disabled={!isEligible}
                           onChange={(e) => handleTestSelection(test.test_id, e.target.checked)}
                           className="mt-1 rounded"
                           onClick={(e) => e.stopPropagation()}
@@ -1110,6 +1134,12 @@ ${result.error || 'Unknown error occurred'}
                               #{test.test_index + 1}
                             </span>
                           </div>
+                          {!isEligible && (
+                            <div className="mb-2 rounded border border-purple-200 bg-purple-50 px-2 py-1 text-xs text-purple-800">
+                              <strong>{(test.execution_eligibility || 'invalid').replace('_', ' ').toUpperCase()}</strong>
+                              {test.eligibility_reason ? `: ${test.eligibility_reason}` : ': Generation oracle rejected this test.'}
+                            </div>
+                          )}
                           <p className="text-xs text-gray-600 mb-1">
                             Session: {test.session_id}
                           </p>
@@ -1149,7 +1179,8 @@ ${result.error || 'Unknown error occurred'}
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -1193,26 +1224,36 @@ ${result.error || 'Unknown error occurred'}
             testCodes={individualTests.filter(test => selectedTests.includes(test.test_id))}
             onResultsCollected={(results) => {
               console.log('Remote execution results collected:', results);
-              // Format and display results in output panel
-              if (onSetOutput && results.aggregated) {
+              if (onSetOutput && results.summary) {
+                const verdictFor = result => result.verdict
+                  || (result.failed > 0 ? 'failed' : (result.status === 'completed' ? 'passed' : 'error'));
+                const details = (results.results || []).map(result => `
+### ${result.filename || result.test_id}
+- **Verdict:** ${verdictFor(result).replace('_', ' ').toUpperCase()}
+- **Execution status:** ${result.status || 'unknown'}
+- **Exit code:** ${result.exit_code ?? 'N/A'}
+- **Reset status:** ${result.reset_status || 'not reported'}
+- **Remote file:** ${result.artifacts?.[0]?.remote_path || 'N/A'}
+
+\`\`\`text
+${result.logs || result.error || 'No output'}
+\`\`\``).join('\n');
                 const output = `
-# 🤖 Remote Robot Execution Results
+# Remote ROS2 Execution Results
 
 ## Summary
-- **Total Tests:** ${results.aggregated.total_tests}
-- **Passed:** ${results.aggregated.passed}
-- **Failed:** ${results.aggregated.failed}
-- **Skipped:** ${results.aggregated.skipped}
-- **Pass Rate:** ${results.aggregated.pass_rate}%
+- **Total Tests:** ${results.summary.total}
+- **Passed:** ${results.summary.passed}
+- **Failed:** ${results.summary.failed}
+- **Errors:** ${results.summary.error || 0}
+- **Blocked:** ${results.summary.blocked || 0}
+- **Not Executed:** ${results.summary.not_executed || 0}
+- **Invalid Tests:** ${results.summary.invalid || 0}
 
-## Status
-${results.aggregated.summary}
-
----
-*Results collected at: ${results.collected_at}*
+${details}
                 `.trim();
-                
-                onSetOutput(output, 'Test Execution - Remote Robot');
+
+                onSetOutput(output, 'Test Execution - Remote ROS2');
               }
             }}
           />

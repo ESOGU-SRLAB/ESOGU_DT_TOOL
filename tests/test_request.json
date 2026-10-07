@@ -1,0 +1,7 @@
+{
+  "process_name": "E2E Test - Remote Execution",
+  "test_ids": ["test-a3e88469", "test-bac40c29", "test-cad43316"],
+  "language": "python",
+  "max_parallel": 5,
+  "timeout": 300
+}

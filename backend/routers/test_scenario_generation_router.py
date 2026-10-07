@@ -9,12 +9,40 @@ import json
 import logging
 from datetime import datetime
 from utils.model_client import LLMClient
+from services.project_structure_service import (
+    EXECUTION_GROUNDING_RULES,
+    ProjectStructureError,
+    build_project_structure,
+    is_project_structure_file,
+    parse_project_structure,
+    project_structure_prompt_context,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     tags=["test-scenario-generation"]
 )
+
+
+async def _project_structure_from_uploads(
+    files: Optional[List[UploadFile]],
+    project_ast_file: Optional[UploadFile] = None,
+):
+    if project_ast_file is not None:
+        return parse_project_structure(
+            await project_ast_file.read(),
+            project_ast_file.filename or "project_ast.json",
+        )
+    source_items = []
+    for upload in files or []:
+        raw = await upload.read()
+        await upload.seek(0)
+        source_items.append({
+            "name": upload.filename or "unknown",
+            "content": raw.decode("utf-8", errors="replace"),
+        })
+    return build_project_structure(source_items)
 
 
 @router.get("/model-context-length/{model_key}")
@@ -64,6 +92,7 @@ async def generate_test_scenario_prompt(request: Request):
         return {
             "generated_custom_prompt": result.get("generated_custom_prompt", ""),
             "session_id": result.get("session_id", ""),
+            "project_structure": result.get("project_structure", {}),
             "status": "success"
         }
     except HTTPException:
@@ -81,7 +110,8 @@ async def run_test_scenario_generation(
     test_type: str = Form(None),
     session_id: str = Form(None),
     process_title: str = Form(None),
-    api_key: Optional[str] = Form(None)
+    api_key: Optional[str] = Form(None),
+    project_ast_file: Optional[UploadFile] = File(None),
 ):
     """
     Test senaryosu üretim işlemini çalıştırır.
@@ -102,6 +132,11 @@ async def run_test_scenario_generation(
         if not process_title or not process_title.strip():
             raise HTTPException(status_code=400, detail="Process title is required")
 
+        try:
+            project_structure = await _project_structure_from_uploads(files, project_ast_file)
+        except ProjectStructureError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         data = {
             "files": files if files else [],
             "model": model or "llama3.2:3b",  # Default model
@@ -110,7 +145,8 @@ async def run_test_scenario_generation(
             "test_type": test_type,
             "session_id": session_id,
             "process_title": process_title,
-            "api_key": api_key
+            "api_key": api_key,
+            "project_structure": project_structure,
         }
         
         logger.info(f"[DEBUG] Calling run_step with data")
@@ -627,6 +663,13 @@ async def get_test_scenarios_from_output(session_id: str):
                     "description": scenario.get("Description", ""),
                     "objective": scenario.get("Objective", ""),
                     "category": scenario.get("Category", ""),
+                    "target_symbols": scenario.get("TargetSymbols", []),
+                    "setup": scenario.get("Setup", []),
+                    "action": scenario.get("Action", ""),
+                    "oracle": scenario.get("Oracle", ""),
+                    "expected_behavior": scenario.get("ExpectedBehavior", "pass"),
+                    "execution_status": scenario.get("ExecutionStatus", ""),
+                    "unsupported_reason": scenario.get("UnsupportedReason", ""),
                     "comments": scenario.get("Comments", "")
                 }
                 test_scenarios.append(processed_scenario)
@@ -690,8 +733,7 @@ async def debug_session_structure(session_id: str):
             "message": f"Debug failed: {str(e)}"
         }
 
-@router.post("/generate-test-cases")
-async def generate_test_cases_for_scenarios(request: Request):
+async def _generate_test_cases_for_scenarios_impl(request: Request):
     """
     Generate test cases for selected test scenarios using LM Studio.
     Each selected scenario gets its own POST request.
@@ -704,6 +746,7 @@ async def generate_test_cases_for_scenarios(request: Request):
         selected_scenarios = data.get("selected_scenarios", [])
         process_prompt = data.get("process_prompt", "")
         selected_files = data.get("selected_files", [])
+        project_structure = data.get("project_structure") or {}
         ai_model = data.get("ai_model", "llama3.2:3b")
         session_id = data.get("session_id", "")
         selected_process_title = data.get("selected_process_title", "")  # Yeni alan
@@ -730,11 +773,21 @@ async def generate_test_cases_for_scenarios(request: Request):
         
         # Prepare file contents and calculate tokens
         file_contents = ""
+        source_items = []
         if selected_files:
             for file_info in selected_files:
                 file_name = file_info.get("name", "Unknown")
                 file_content = file_info.get("content", "")
+                file_type = file_info.get("type")
+                if is_project_structure_file(file_name, file_type):
+                    if not project_structure:
+                        project_structure = parse_project_structure(file_content, file_name)
+                    continue
+                source_items.append({"name": file_name, "content": file_content})
                 file_contents += f"\n\n=== FILE: {file_name} ===\n{file_content}\n"
+        if not project_structure:
+            project_structure = build_project_structure(source_items)
+        project_ast_context = project_structure_prompt_context(project_structure)
         
         # Token limit control (same as Test Scenario Generation)
         from utils.text_splitter import count_tokens
@@ -790,6 +843,14 @@ async def generate_test_cases_for_scenarios(request: Request):
       "Title": "<Clear and descriptive test case title>",
       "Description": "<Detailed test case description explaining what is being tested and why it's important>",
       "Objective": "<Specific objective of this test case>",
+      "TargetSymbols": ["package.module.Class.method"],
+      "Preconditions": ["Concrete executable setup"],
+      "TestSteps": ["Concrete call using a declared signature"],
+      "ExpectedResult": "Observable value, state, or declared error",
+      "OracleType": "return_value/state/error/exception",
+      "ExpectedBehavior": "pass or expected_rejection",
+      "ExecutionStatus": "executable or unsupported",
+      "UnsupportedReason": "Empty when executable; otherwise missing API/observable",
       "Comments": "<Additional notes, assumptions, or considerations>"
     }
   ],
@@ -810,9 +871,18 @@ async def generate_test_cases_for_scenarios(request: Request):
 **Description:** {scenario.get('description', scenario.get('Description', ''))}
 **Objective:** {scenario.get('objective', scenario.get('Objective', ''))}
 **Category:** {scenario.get('category', scenario.get('Category', ''))}
+**Scenario Target Symbols:** {scenario.get('target_symbols', scenario.get('TargetSymbols', []))}
+**Scenario Action:** {scenario.get('action', scenario.get('Action', ''))}
+**Scenario Oracle:** {scenario.get('oracle', scenario.get('Oracle', ''))}
+**Scenario Execution Status:** {scenario.get('execution_status', scenario.get('ExecutionStatus', ''))}
 
 ## APPLICATION CODE/FILES TO ANALYZE:
 {file_contents}
+
+{EXECUTION_GROUNDING_RULES}
+
+## PROJECT AST MANIFEST:
+{project_ast_context}
 
 ## STRICT OUTPUT REQUIREMENTS:
 Respond ONLY with a valid JSON object with this EXACT structure (no other text):
@@ -836,6 +906,9 @@ Each test case should cover different aspects.
 - Make test cases directly related to the scenario objectives
 - Write practical test procedures
 - Include comprehensive validation steps
+- Every executable case must name at least one exact TargetSymbols entry present in the Project AST manifest or approved robot contract
+- Preserve unsupported scenarios as unsupported; never fabricate an implementation path
+- Define the oracle before the steps and make ExpectedResult directly assertable
 - Consider both functional and non-functional aspects
 
 Generate between 7-8 detailed test cases that thoroughly validate this specific scenario with simplified structure. Start your response immediately with the JSON object."""
@@ -1000,6 +1073,14 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                             "Description": tc.get("Description", f"Test case for validating {scenario_title}"),
                             "Objective": tc.get("Objective", f"Verify functionality of {scenario_title}"),
                             "Category": tc.get("Category", "Positive"),
+                            "TargetSymbols": tc.get("TargetSymbols", []),
+                            "Preconditions": tc.get("Preconditions", []),
+                            "TestSteps": tc.get("TestSteps", []),
+                            "ExpectedResult": tc.get("ExpectedResult", ""),
+                            "OracleType": tc.get("OracleType", ""),
+                            "ExpectedBehavior": tc.get("ExpectedBehavior", "pass"),
+                            "ExecutionStatus": tc.get("ExecutionStatus", "unsupported" if not tc.get("TargetSymbols") else "executable"),
+                            "UnsupportedReason": tc.get("UnsupportedReason", "No declared target symbol was supplied" if not tc.get("TargetSymbols") else ""),
                             "Comments": tc.get("Comments", "Review and enhance as needed")
                         }
                         enhanced_test_cases.append(enhanced_tc)
@@ -1078,6 +1159,14 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                             "Description": f"Comprehensive test case for validating {scenario_title}. This test case was auto-generated from the scenario requirements.",
                             "Objective": f"Verify the functionality and behavior of {scenario_title}",
                             "Category": "Positive",
+                            "TargetSymbols": [],
+                            "Preconditions": [],
+                            "TestSteps": [],
+                            "ExpectedResult": "",
+                            "OracleType": "",
+                            "ExpectedBehavior": "pass",
+                            "ExecutionStatus": "unsupported",
+                            "UnsupportedReason": "The LLM response could not be parsed into an execution-grounded test case.",
                             "Comments": "Auto-generated test case. Please review and enhance based on specific requirements."
                         }
                         fallback_test_cases.append(test_case)
@@ -1110,6 +1199,14 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                         "Description": f"Basic test case generated for {scenario_title}",
                         "Objective": f"Verify basic functionality of {scenario_title}",
                         "Category": "Positive",
+                        "TargetSymbols": [],
+                        "Preconditions": [],
+                        "TestSteps": [],
+                        "ExpectedResult": "",
+                        "OracleType": "",
+                        "ExpectedBehavior": "pass",
+                        "ExecutionStatus": "unsupported",
+                        "UnsupportedReason": "Generation failed before an executable target and oracle could be established.",
                         "Comments": "Emergency fallback test case"
                     }
                     
@@ -1174,6 +1271,7 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                         "$set": {
                             "processes.test_case_generation.output": {
                                 "test_case_results": test_case_results,
+                                "project_structure": project_structure,
                                 "metadata": {
                                     "generated_at": datetime.utcnow(),
                                     "scenarios_processed": len(selected_scenarios),
@@ -1204,6 +1302,7 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
         return {
             "status": "success",
             "test_case_results": test_case_results,
+            "project_structure": project_structure,
             "summary": {
                 "scenarios_processed": len(selected_scenarios),
                 "successful_scenarios": successful_scenarios,
@@ -1219,3 +1318,11 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
     except Exception as e:
         logger.error(f"[TestCaseGeneration] Error in generate_test_cases_for_scenarios: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-test-cases")
+async def generate_test_cases_for_scenarios(request: Request):
+    """Backward-compatible UI route using the shared generation entry point."""
+    from services.test_case_generation_service import TestCaseGenerationService
+
+    return await TestCaseGenerationService().generate(await request.json())
